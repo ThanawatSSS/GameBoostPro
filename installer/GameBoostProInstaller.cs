@@ -11,15 +11,15 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Game Boost Pro Setup")]
 [assembly: AssemblyProduct("Game Boost Pro")]
 [assembly: AssemblyCompany("Game Boost Pro")]
-[assembly: AssemblyVersion("3.0.0.0")]
-[assembly: AssemblyFileVersion("3.0.0.0")]
+[assembly: AssemblyVersion("3.1.0.0")]
+[assembly: AssemblyFileVersion("3.1.0.0")]
 
 namespace GameBoostProSetup
 {
     internal static class Product
     {
         public const string Name = "Game Boost Pro";
-        public const string Version = "3.0.0";
+        public const string Version = "3.1.0";
         public const string FolderName = "Game Boost Pro";
         public const string AppFile = "GameBoostPro.exe";
         public const string ReadmeFile = "README.txt";
@@ -28,6 +28,13 @@ namespace GameBoostProSetup
         public static string InstallDirectory
         {
             get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), FolderName); }
+        }
+
+        public static bool IsAppRunning()
+        {
+            Process[] processes = Process.GetProcessesByName("GameBoostPro");
+            try { return processes.Length > 0; }
+            finally { foreach (Process process in processes) process.Dispose(); }
         }
     }
 
@@ -42,31 +49,30 @@ namespace GameBoostProSetup
             Text = "Game Boost Pro Setup";
             StartPosition = FormStartPosition.CenterScreen;
             ClientSize = new Size(590, 390);
-            MinimumSize = new Size(590, 390);
-            MaximumSize = new Size(590, 390);
+            FormBorderStyle = FormBorderStyle.FixedSingle;
             MaximizeBox = false;
-            BackColor = Color.FromArgb(19, 22, 18);
-            ForeColor = Color.FromArgb(238, 242, 231);
+            BackColor = Color.FromArgb(17, 19, 18);
+            ForeColor = Color.FromArgb(239, 242, 240);
             Font = new Font("Segoe UI", 9);
             Icon icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             if (icon != null) Icon = icon;
 
             Controls.Add(MakeLabel("GAME BOOST", 30, 25, 185, 34, 19, FontStyle.Bold, ForeColor));
-            Label badge = MakeLabel("SETUP 3.0", 220, 30, 76, 24, 8, FontStyle.Bold, BackColor);
+            Label badge = MakeLabel("SETUP 3.1", 220, 30, 76, 24, 8, FontStyle.Bold, BackColor);
             badge.BackColor = Color.FromArgb(199, 243, 107);
             badge.TextAlign = ContentAlignment.MiddleCenter;
             Controls.Add(badge);
             badge.BringToFront();
             Controls.Add(MakeLabel("Best performance profile for supported Windows gaming systems", 31, 65, 500, 24,
-                9, FontStyle.Regular, Color.FromArgb(159, 169, 149)));
+                9, FontStyle.Regular, Color.FromArgb(158, 169, 164)));
 
-            Panel line = new Panel { Location = new Point(30, 104), Size = new Size(530, 1), BackColor = Color.FromArgb(62, 69, 57) };
+            Panel line = new Panel { Location = new Point(30, 104), Size = new Size(530, 1), BackColor = Color.FromArgb(67, 73, 70) };
             Controls.Add(line);
             Controls.Add(MakeLabel("SUPPORTED", 31, 127, 120, 22, 8, FontStyle.Bold, Color.FromArgb(244, 183, 77)));
             Controls.Add(MakeLabel("Acer Laptop + NitroSense", 31, 154, 255, 24, 11, FontStyle.Bold, ForeColor));
             Controls.Add(MakeLabel("Desktop PC", 302, 154, 170, 24, 11, FontStyle.Bold, ForeColor));
             Controls.Add(MakeLabel("โน้ตบุ๊กยี่ห้ออื่นจะถูกตรวจพบและปิด Boost เพื่อความปลอดภัย", 31, 185, 510, 24,
-                9, FontStyle.Regular, Color.FromArgb(159, 169, 149)));
+                9, FontStyle.Regular, Color.FromArgb(158, 169, 164)));
 
             Controls.Add(MakeLabel("INSTALL LOCATION", 31, 225, 160, 22, 8, FontStyle.Bold, Color.FromArgb(244, 183, 77)));
             TextBox path = new TextBox
@@ -76,13 +82,13 @@ namespace GameBoostProSetup
                 Size = new Size(528, 28),
                 ReadOnly = true,
                 BorderStyle = BorderStyle.FixedSingle,
-                BackColor = Color.FromArgb(29, 34, 28),
+                BackColor = Color.FromArgb(27, 30, 29),
                 ForeColor = ForeColor
             };
             Controls.Add(path);
 
             status = MakeLabel("พร้อมติดตั้ง / Windows จะบันทึก Uninstaller ให้", 31, 303, 350, 42,
-                9, FontStyle.Regular, Color.FromArgb(159, 169, 149));
+                9, FontStyle.Regular, Color.FromArgb(158, 169, 164));
             Controls.Add(status);
             installButton = new Button
             {
@@ -90,7 +96,7 @@ namespace GameBoostProSetup
                 Location = new Point(416, 303),
                 Size = new Size(143, 44),
                 BackColor = Color.FromArgb(199, 243, 107),
-                ForeColor = Color.FromArgb(19, 22, 18),
+                ForeColor = Color.FromArgb(17, 19, 18),
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 10, FontStyle.Bold),
                 Cursor = Cursors.Hand
@@ -108,7 +114,7 @@ namespace GameBoostProSetup
                 Close();
                 return;
             }
-            if (Process.GetProcessesByName("GameBoostPro").Length > 0)
+            if (Product.IsAppRunning())
             {
                 MessageBox.Show(this, "กรุณาออกจาก Game Boost Pro ก่อนติดตั้งรุ่นใหม่", Product.Name,
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -127,7 +133,7 @@ namespace GameBoostProSetup
                 CreateShortcuts();
                 RegisterUninstaller();
                 installed = true;
-                status.Text = "ติดตั้ง Game Boost Pro 3.0 เรียบร้อยแล้ว";
+                status.Text = "ติดตั้ง Game Boost Pro 3.1 เรียบร้อยแล้ว";
                 status.ForeColor = Color.FromArgb(199, 243, 107);
                 installButton.Text = "LAUNCH";
                 installButton.Enabled = true;
@@ -246,7 +252,7 @@ namespace GameBoostProSetup
         {
             if (MessageBox.Show("ต้องการถอนการติดตั้ง Game Boost Pro หรือไม่?\n\nโปรไฟล์ส่วนตัวจะยังถูกเก็บไว้",
                 Product.Name, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
-            if (Process.GetProcessesByName("GameBoostPro").Length > 0)
+            if (Product.IsAppRunning())
             {
                 MessageBox.Show("กรุณาออกจาก Game Boost Pro ก่อนถอนการติดตั้ง", Product.Name,
                     MessageBoxButtons.OK, MessageBoxIcon.Information);

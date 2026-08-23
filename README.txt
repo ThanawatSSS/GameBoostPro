@@ -1,4 +1,4 @@
-Game Boost Pro 3.0
+Game Boost Pro 3.1
 ==================
 
 SUPPORTED PLATFORMS
@@ -15,7 +15,7 @@ power profile from competing with an untested OEM control application.
 
 WHAT BEST MODE DOES
 - Saves the current Windows power plan before every Boost session
-- Activates Ultimate Performance, or creates/uses High Performance as fallback
+- Activates Ultimate Performance and creates the plan automatically when absent
 - Enables Windows Game Mode
 - Disables Game DVR and background capture during the session
 - Requests the high-performance GPU for the detected game
@@ -37,8 +37,15 @@ DESKTOP PC MODE
 GAME LIBRARY
 - Detects installed games from Steam, Epic Games and Riot
 - Detects popular running games such as CS2, PUBG and VALORANT
-- Use GAME LIBRARY to select an installed game
-- Use Add Game for standalone games or unusual launcher layouts
+- Search and filter by Steam, Epic, Riot or Manual source
+- Use PLAY NOW to select and launch, or USE PROFILE to select without launching
+- Use ADD EXE for standalone games or unusual launcher layouts
+
+ADVANCED MODE
+- The ADVANCED BEST button is always visible in the main window
+- Six controls independently manage Game Mode, capture, GPU preference,
+  AboveNormal priority, HighQoS and Dynamic Priority Boost
+- RESET BEST enables all six controls; Ultimate Performance remains mandatory
 
 ADMIN PERMISSION
 - The portable app and installed app request Administrator permission at launch
@@ -61,4 +68,4 @@ Game Boost cannot create performance beyond the CPU, GPU, cooling and power limi
 of the computer. The target is steadier frame time and fewer avoidable background
 interruptions. Actual FPS improvement depends on the existing bottleneck.
 
-Game Boost Pro 3.0 is distributed under the MIT License.
+Game Boost Pro 3.1 is distributed under the MIT License.

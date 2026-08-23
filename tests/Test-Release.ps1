@@ -11,12 +11,12 @@ function Assert-True([bool]$condition, [string]$message) {
 
 $appPath = (Resolve-Path (Join-Path $dist 'GameBoostPro.exe')).Path
 $setupPath = (Resolve-Path (Join-Path $dist 'GameBoostPro-Setup.exe')).Path
-$zipPath = (Resolve-Path (Join-Path $dist 'GameBoostPro-Portable-v3.0.0.zip')).Path
+$zipPath = (Resolve-Path (Join-Path $dist 'GameBoostPro-Portable-v3.1.0.zip')).Path
 $assembly = [Reflection.Assembly]::LoadFile($appPath)
 $flags = [Reflection.BindingFlags]'Static,Public,NonPublic'
 
-Assert-True ((Get-Item $appPath).VersionInfo.FileVersion -eq '3.0.0.0') 'app version'
-Assert-True ((Get-Item $setupPath).VersionInfo.FileVersion -eq '3.0.0.0') 'setup version'
+Assert-True ((Get-Item $appPath).VersionInfo.FileVersion -eq '3.1.0.0') 'app version'
+Assert-True ((Get-Item $setupPath).VersionInfo.FileVersion -eq '3.1.0.0') 'setup version'
 
 $platformDetector = $assembly.GetType('GameBoostPro.PlatformDetector')
 $evaluate = $platformDetector.GetMethod('Evaluate', $flags)
@@ -61,6 +61,17 @@ Assert-True ($appManifest -match 'requireAdministrator') 'app requests UAC'
 Assert-True ($setupManifest -match 'requireAdministrator') 'setup requests UAC'
 
 $source = Get-Content (Join-Path $root 'src\GameBoostPro.cs') -Raw
-Assert-True ($source -notmatch 'Stop-Service|Set-Service|ProcessPriorityClass\.High|Realtime') 'forbidden tuning operations'
+Assert-True ($source -notmatch 'Stop-Service|Set-Service|ServiceController|ProcessPriorityClass\.(High|RealTime)') `
+    'forbidden tuning operations'
+Assert-True ($source -match '/duplicatescheme " \+ UltimateGuid') 'Ultimate Performance auto-create'
+Assert-True ($source -match 'Game Boost Pro Ultimate\|Ultimate Performance') 'existing Ultimate plan reuse'
+Assert-True ($source -notmatch 'HighPerformanceGuid') 'no High Performance fallback'
+Assert-True ($source -match 'ADVANCED  BEST') 'visible Advanced Mode'
+Assert-True ($source -match 'Task\.Factory\.StartNew') 'monitoring runs outside the UI thread'
+Assert-True ($source -match 'private static volatile bool catalogLoaded') 'non-blocking catalog readiness'
+Assert-True ($source -match 'detectedGame\.Process\.Dispose\(\)') 'long-session process cleanup'
+
+& (Join-Path $root 'tests\Test-Performance.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Performance tests failed' }
 
 Write-Host 'All release tests passed.' -ForegroundColor Green

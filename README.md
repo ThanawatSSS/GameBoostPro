@@ -1,4 +1,4 @@
-# Game Boost Pro 3.0
+# Game Boost Pro 3.1
 
 One-button, reversible Windows gaming optimization with automatic game detection.
 
@@ -16,12 +16,16 @@ The current release intentionally supports only **Acer + NitroSense laptops** an
 ## Features
 
 - Detects running games and Steam, Epic Games, and Riot installations
-- Game Library for selecting an installed title
-- Ultimate Performance with High Performance fallback
+- Searchable Game Library with source filters, manual EXE import, profile selection,
+  install-folder access, and direct launch
+- Ultimate Performance only; the plan is created automatically when Windows does
+  not already expose it
+- Visible Advanced Mode with six independently reversible tuning controls
 - Windows Game Mode and per-game high-performance GPU preference
 - Reversible Game DVR/background capture settings
 - `AboveNormal` game priority and HighQoS without `High` or `Realtime` priority
-- CPU, memory, and GPU 3D activity monitoring
+- Asynchronous, cached CPU, memory, GPU 3D, and game-process monitoring
+- Background game-library discovery so launcher manifests do not block first paint
 - Protected Discord, TeamSpeak 3, NitroSense, and Acer hardware processes
 - Atomic recovery state saved before tuning
 - Native portable executable and native Setup/Uninstall package
@@ -49,7 +53,7 @@ Artifacts are written to `dist/`.
 ## Install
 
 - Installer: run `GameBoostPro-Setup.exe`
-- Portable: extract `GameBoostPro-Portable-v3.0.0.zip`, then run `GameBoostPro.exe`
+- Portable: extract `GameBoostPro-Portable-v3.1.0.zip`, then run `GameBoostPro.exe`
 
 Windows SmartScreen may identify unsigned community builds as an unknown publisher.
 Verify the SHA-256 hashes in the GitHub Release before running them.

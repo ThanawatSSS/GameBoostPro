@@ -9,6 +9,7 @@ using System.Management;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -17,20 +18,21 @@ using Microsoft.Win32;
 [assembly: System.Reflection.AssemblyDescription("Smart game detection and reversible Windows gaming optimization")]
 [assembly: System.Reflection.AssemblyProduct("Game Boost Pro")]
 [assembly: System.Reflection.AssemblyCompany("Local PC Tools")]
-[assembly: System.Reflection.AssemblyVersion("3.0.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("3.0.0.0")]
+[assembly: System.Reflection.AssemblyVersion("3.1.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("3.1.0.0")]
 
 namespace GameBoostPro
 {
     internal static class Palette
     {
-        public static readonly Color Back = Color.FromArgb(19, 22, 18);
-        public static readonly Color Surface = Color.FromArgb(29, 34, 28);
-        public static readonly Color SurfaceHigh = Color.FromArgb(38, 44, 36);
-        public static readonly Color Line = Color.FromArgb(62, 69, 57);
-        public static readonly Color Text = Color.FromArgb(238, 242, 231);
-        public static readonly Color Muted = Color.FromArgb(159, 169, 149);
+        public static readonly Color Back = Color.FromArgb(17, 19, 18);
+        public static readonly Color Surface = Color.FromArgb(27, 30, 29);
+        public static readonly Color SurfaceHigh = Color.FromArgb(39, 43, 41);
+        public static readonly Color Line = Color.FromArgb(67, 73, 70);
+        public static readonly Color Text = Color.FromArgb(239, 242, 240);
+        public static readonly Color Muted = Color.FromArgb(158, 169, 164);
         public static readonly Color Lime = Color.FromArgb(199, 243, 107);
+        public static readonly Color Cyan = Color.FromArgb(92, 207, 219);
         public static readonly Color Amber = Color.FromArgb(244, 183, 77);
         public static readonly Color Coral = Color.FromArgb(242, 112, 89);
     }
@@ -175,11 +177,17 @@ namespace GameBoostPro
 
         private static bool DetectNitroSense()
         {
+            Process[] processes = new Process[0];
             try
             {
-                if (Process.GetProcessesByName("NitroSense").Length > 0) return true;
+                processes = Process.GetProcessesByName("NitroSense");
+                if (processes.Length > 0) return true;
             }
             catch { }
+            finally
+            {
+                foreach (Process process in processes) process.Dispose();
+            }
             try
             {
                 using (RegistryKey agent = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\AASSvc"))
@@ -223,11 +231,29 @@ namespace GameBoostPro
         public string LibraryGameName { get; set; }
         public string LibraryGameDirectory { get; set; }
         public string LibraryLaunchTarget { get; set; }
+        public string LibraryLaunchArguments { get; set; }
+        public bool EnableWindowsGameMode { get; set; }
+        public bool DisableBackgroundCapture { get; set; }
+        public bool PreferHighPerformanceGpu { get; set; }
+        public bool UseAboveNormalPriority { get; set; }
+        public bool UseHighQos { get; set; }
+        public bool UseDynamicPriorityBoost { get; set; }
 
         public AppConfig()
         {
-            Version = 3;
+            Version = 4;
             AutoMode = true;
+            ResetAdvancedDefaults();
+        }
+
+        public void ResetAdvancedDefaults()
+        {
+            EnableWindowsGameMode = true;
+            DisableBackgroundCapture = true;
+            PreferHighPerformanceGpu = true;
+            UseAboveNormalPriority = true;
+            UseHighQos = true;
+            UseDynamicPriorityBoost = true;
         }
     }
 
@@ -256,6 +282,10 @@ namespace GameBoostPro
         public bool HadPowerThrottleState { get; set; }
         public uint PreviousThrottleControl { get; set; }
         public uint PreviousThrottleState { get; set; }
+        public bool PreferHighPerformanceGpu { get; set; }
+        public bool UseAboveNormalPriority { get; set; }
+        public bool UseHighQos { get; set; }
+        public bool UseDynamicPriorityBoost { get; set; }
         public List<RegistrySnapshot> Registry { get; set; }
     }
 
@@ -279,6 +309,7 @@ namespace GameBoostPro
         public string DirectoryPath { get; set; }
         public string Source { get; set; }
         public string LaunchTarget { get; set; }
+        public string LaunchArguments { get; set; }
     }
 
     internal static class GameDetector
@@ -319,12 +350,23 @@ namespace GameBoostPro
         };
 
         private static readonly List<GameInstall> Catalog = new List<GameInstall>();
+        private static readonly object CatalogLock = new object();
         private static readonly JavaScriptSerializer Json = new JavaScriptSerializer();
-        private static bool catalogLoaded;
+        private static volatile bool catalogLoaded;
+        private static DateTime lastDeepScanUtc = DateTime.MinValue;
+        private static int cachedDeepProcessId;
+        private static string cachedDeepDisplayName = "";
+        private static string cachedDeepExePath = "";
+        private static string cachedDeepSource = "";
 
         public static int InstalledCount
         {
-            get { EnsureCatalog(); return Catalog.Count; }
+            get { lock (CatalogLock) return Catalog.Count; }
+        }
+
+        public static bool IsCatalogLoaded
+        {
+            get { return catalogLoaded; }
         }
 
         public static string InstalledSummary
@@ -333,8 +375,9 @@ namespace GameBoostPro
             {
                 EnsureCatalog();
                 List<string> names = new List<string>();
-                foreach (GameInstall item in Catalog)
-                    if (!names.Contains(item.DisplayName)) names.Add(item.DisplayName);
+                lock (CatalogLock)
+                    foreach (GameInstall item in Catalog)
+                        if (!names.Contains(item.DisplayName)) names.Add(item.DisplayName);
                 return String.Join(" / ", names.ToArray());
             }
         }
@@ -342,78 +385,131 @@ namespace GameBoostPro
         public static List<GameInstall> GetCatalog()
         {
             EnsureCatalog();
-            return new List<GameInstall>(Catalog);
+            lock (CatalogLock) return new List<GameInstall>(Catalog);
         }
 
         public static void RefreshCatalog()
         {
-            Catalog.Clear();
-            DiscoverSteam();
-            DiscoverEpic();
-            DiscoverRiot();
-            catalogLoaded = true;
+            lock (CatalogLock)
+            {
+                Catalog.Clear();
+                DiscoverSteam();
+                DiscoverEpic();
+                DiscoverRiot();
+                catalogLoaded = true;
+            }
         }
 
         public static DetectedGame FindRunningGame(string manualPath)
         {
             EnsureCatalog();
-            foreach (Process process in Process.GetProcesses())
+            Process[] processes = Process.GetProcesses();
+            DetectedGame result = null;
+            try
             {
-                try
+                int currentProcessId;
+                using (Process currentProcess = Process.GetCurrentProcess()) currentProcessId = currentProcess.Id;
+                string manualName = String.IsNullOrWhiteSpace(manualPath)
+                    ? "" : Path.GetFileNameWithoutExtension(manualPath);
+
+                foreach (Process process in processes)
                 {
-                    if (process.Id == Process.GetCurrentProcess().Id || process.HasExited) continue;
-                    string processName = process.ProcessName;
-                    if (SafetyPolicy.IsProtectedProcess(processName)) continue;
-                    string knownName;
-                    if (KnownProcesses.TryGetValue(processName, out knownName))
+                    try
                     {
-                        return new DetectedGame
+                        if (process.Id == currentProcessId) continue;
+                        string processName = process.ProcessName;
+                        if (SafetyPolicy.IsProtectedProcess(processName)) continue;
+                        string knownName;
+                        if (KnownProcesses.TryGetValue(processName, out knownName))
                         {
-                            DisplayName = knownName,
-                            ExePath = TryGetProcessPath(process),
-                            Source = "KNOWN",
-                            Process = process
-                        };
-                    }
-
-                    if (ExcludedProcesses.Contains(processName)) continue;
-                    string exePath = TryGetProcessPath(process);
-                    if (String.IsNullOrWhiteSpace(exePath)) continue;
-
-                    if (!String.IsNullOrWhiteSpace(manualPath) &&
-                        String.Equals(exePath, manualPath, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return new DetectedGame
+                            result = CreateDetectedGame(knownName, TryGetProcessPath(process), "KNOWN", process);
+                            break;
+                        }
+                        if (!String.IsNullOrWhiteSpace(manualName) &&
+                            String.Equals(processName, manualName, StringComparison.OrdinalIgnoreCase))
                         {
-                            DisplayName = Path.GetFileNameWithoutExtension(manualPath),
-                            ExePath = exePath,
-                            Source = "MANUAL",
-                            Process = process
-                        };
-                    }
-
-                    foreach (GameInstall install in Catalog)
-                    {
-                        if (IsUnderDirectory(exePath, install.DirectoryPath))
-                        {
-                            return new DetectedGame
+                            string path = TryGetProcessPath(process);
+                            if (String.IsNullOrWhiteSpace(path) ||
+                                String.Equals(path, manualPath, StringComparison.OrdinalIgnoreCase))
                             {
-                                DisplayName = install.DisplayName,
-                                ExePath = exePath,
-                                Source = install.Source,
-                                Process = process
-                            };
+                                result = CreateDetectedGame(manualName, path, "MANUAL", process);
+                                break;
+                            }
                         }
                     }
+                    catch { }
                 }
-                catch { }
+
+                if (result == null && cachedDeepProcessId > 0)
+                {
+                    foreach (Process process in processes)
+                    {
+                        if (process.Id != cachedDeepProcessId) continue;
+                        string currentPath = TryGetProcessPath(process);
+                        if (String.Equals(currentPath, cachedDeepExePath, StringComparison.OrdinalIgnoreCase))
+                            result = CreateDetectedGame(cachedDeepDisplayName, cachedDeepExePath, cachedDeepSource, process);
+                        else
+                            ClearDeepCache();
+                        break;
+                    }
+                    if (result == null) ClearDeepCache();
+                }
+
+                if (result == null && DateTime.UtcNow - lastDeepScanUtc >= TimeSpan.FromSeconds(8))
+                {
+                    lastDeepScanUtc = DateTime.UtcNow;
+                    List<GameInstall> catalog;
+                    lock (CatalogLock) catalog = new List<GameInstall>(Catalog);
+
+                    foreach (Process process in processes)
+                    {
+                        try
+                        {
+                            string processName = process.ProcessName;
+                            if (SafetyPolicy.IsProtectedProcess(processName) || ExcludedProcesses.Contains(processName)) continue;
+                            string exePath = TryGetProcessPath(process);
+                            if (String.IsNullOrWhiteSpace(exePath)) continue;
+                            foreach (GameInstall install in catalog)
+                            {
+                                if (!IsUnderDirectory(exePath, install.DirectoryPath)) continue;
+                                result = CreateDetectedGame(install.DisplayName, exePath, install.Source, process);
+                                cachedDeepProcessId = process.Id;
+                                cachedDeepDisplayName = install.DisplayName;
+                                cachedDeepExePath = exePath;
+                                cachedDeepSource = install.Source;
+                                break;
+                            }
+                            if (result != null) break;
+                        }
+                        catch { }
+                    }
+                }
             }
-            return null;
+            finally
+            {
+                foreach (Process process in processes)
+                    if (result == null || result.Process == null || process.Id != result.Process.Id) process.Dispose();
+            }
+            return result;
+        }
+
+        private static DetectedGame CreateDetectedGame(string name, string path, string source, Process process)
+        {
+            return new DetectedGame { DisplayName = name, ExePath = path, Source = source, Process = process };
+        }
+
+        private static void ClearDeepCache()
+        {
+            cachedDeepProcessId = 0;
+            cachedDeepDisplayName = "";
+            cachedDeepExePath = "";
+            cachedDeepSource = "";
         }
 
         private static void EnsureCatalog()
         {
-            if (!catalogLoaded) RefreshCatalog();
+            lock (CatalogLock)
+                if (!catalogLoaded) RefreshCatalog();
         }
 
         private static string TryGetProcessPath(Process process)
@@ -434,19 +530,24 @@ namespace GameBoostPro
             catch { return false; }
         }
 
-        private static void AddInstall(string name, string path, string source, string launchTarget)
+        private static void AddInstall(string name, string path, string source, string launchTarget,
+            string launchArguments = "")
         {
             if (String.IsNullOrWhiteSpace(name) || String.IsNullOrWhiteSpace(path) || !Directory.Exists(path)) return;
             path = NormalizeDirectory(path);
-            foreach (GameInstall item in Catalog)
-                if (String.Equals(item.DirectoryPath, path, StringComparison.OrdinalIgnoreCase)) return;
-            Catalog.Add(new GameInstall
+            lock (CatalogLock)
             {
-                DisplayName = name,
-                DirectoryPath = path,
-                Source = source,
-                LaunchTarget = launchTarget ?? ""
-            });
+                foreach (GameInstall item in Catalog)
+                    if (String.Equals(item.DirectoryPath, path, StringComparison.OrdinalIgnoreCase)) return;
+                Catalog.Add(new GameInstall
+                {
+                    DisplayName = name,
+                    DirectoryPath = path,
+                    Source = source,
+                    LaunchTarget = launchTarget ?? "",
+                    LaunchArguments = launchArguments ?? ""
+                });
+            }
         }
 
         private static void DiscoverSteam()
@@ -538,7 +639,9 @@ namespace GameBoostPro
                     {
                         string normalized = path.Replace('/', Path.DirectorySeparatorChar);
                         string directory = File.Exists(normalized) ? Path.GetDirectoryName(normalized) : normalized;
-                        AddInstall("VALORANT", directory, "RIOT", File.Exists(normalized) ? normalized : "");
+                        string client = Convert.ToString(clients[path]).Replace('/', Path.DirectorySeparatorChar);
+                        AddInstall("VALORANT", directory, "RIOT", File.Exists(client) ? client : "",
+                            "--launch-product=valorant --launch-patchline=live");
                     }
                 }
             }
@@ -583,10 +686,11 @@ namespace GameBoostPro
                     string raw = File.ReadAllText(ConfigPath);
                     AppConfig config = Json.Deserialize<AppConfig>(raw);
                     Dictionary<string, object> fields = Json.Deserialize<Dictionary<string, object>>(raw);
-                    if (!fields.ContainsKey("Version") || config.Version < 3)
+                    if (!fields.ContainsKey("Version") || config.Version < 4)
                     {
-                        config.Version = 3;
-                        config.AutoMode = true;
+                        config.Version = 4;
+                        if (!fields.ContainsKey("AutoMode")) config.AutoMode = true;
+                        config.ResetAdvancedDefaults();
                         SaveConfig(config);
                     }
                     return config;
@@ -639,12 +743,15 @@ namespace GameBoostPro
     internal static class SystemTuner
     {
         private const string UltimateGuid = "e9a42b02-d5df-448d-aa00-03f14749eb61";
-        private const string HighPerformanceGuid = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c";
 
-        private static readonly Tuple<string, string, object, RegistryValueKind>[] Tweaks =
+        private static readonly Tuple<string, string, object, RegistryValueKind>[] GameModeTweaks =
         {
             Tuple.Create(@"Software\Microsoft\GameBar", "AutoGameModeEnabled", (object)1, RegistryValueKind.DWord),
-            Tuple.Create(@"Software\Microsoft\GameBar", "AllowAutoGameMode", (object)1, RegistryValueKind.DWord),
+            Tuple.Create(@"Software\Microsoft\GameBar", "AllowAutoGameMode", (object)1, RegistryValueKind.DWord)
+        };
+
+        private static readonly Tuple<string, string, object, RegistryValueKind>[] CaptureTweaks =
+        {
             Tuple.Create(@"System\GameConfigStore", "GameDVR_Enabled", (object)0, RegistryValueKind.DWord),
             Tuple.Create(@"Software\Microsoft\Windows\CurrentVersion\GameDVR", "AppCaptureEnabled", (object)0, RegistryValueKind.DWord)
         };
@@ -668,16 +775,21 @@ namespace GameBoostPro
         {
             string schemes = RunPowerCfg("/list");
             if (schemes.IndexOf(UltimateGuid, StringComparison.OrdinalIgnoreCase) >= 0) return UltimateGuid;
-            if (schemes.IndexOf(HighPerformanceGuid, StringComparison.OrdinalIgnoreCase) >= 0) return HighPerformanceGuid;
+            Match existing = Regex.Match(schemes,
+                @"([0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}).*\((?:Game Boost Pro Ultimate|Ultimate Performance)\)",
+                RegexOptions.IgnoreCase);
+            if (existing.Success) return existing.Groups[1].Value;
 
-            string output = RunPowerCfg("/duplicatescheme " + HighPerformanceGuid);
+            string output = RunPowerCfg("/duplicatescheme " + UltimateGuid);
             Match duplicated = Regex.Match(output, @"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}");
             if (!duplicated.Success)
-                throw new InvalidOperationException("สร้าง High Performance power plan ไม่สำเร็จ");
+                throw new InvalidOperationException("สร้าง Ultimate Performance power plan ไม่สำเร็จ");
+            RunPowerCfg("/changename " + duplicated.Value + " \"Game Boost Pro Ultimate\"");
             return duplicated.Value;
         }
 
-        public static BoostState Enable(string gamePath, bool autoTriggered, int processId, PlatformProfile platform)
+        public static BoostState Enable(string gamePath, bool autoTriggered, int processId,
+            PlatformProfile platform, AppConfig options)
         {
             if (Storage.HasState()) throw new InvalidOperationException("Game Mode เปิดอยู่แล้ว");
             if (platform == null || !platform.IsSupported)
@@ -697,13 +809,18 @@ namespace GameBoostPro
                 AutoTriggered = autoTriggered,
                 GamePath = gamePath ?? "",
                 GameProcessId = processId,
+                PreferHighPerformanceGpu = options.PreferHighPerformanceGpu,
+                UseAboveNormalPriority = options.UseAboveNormalPriority,
+                UseHighQos = options.UseHighQos,
+                UseDynamicPriorityBoost = options.UseDynamicPriorityBoost,
                 Registry = new List<RegistrySnapshot>()
             };
 
-            foreach (Tuple<string, string, object, RegistryValueKind> tweak in Tweaks)
+            List<Tuple<string, string, object, RegistryValueKind>> enabledTweaks = GetEnabledTweaks(options);
+            foreach (Tuple<string, string, object, RegistryValueKind> tweak in enabledTweaks)
                 state.Registry.Add(Capture(tweak.Item1, tweak.Item2));
 
-            if (!String.IsNullOrWhiteSpace(gamePath))
+            if (options.PreferHighPerformanceGpu && !String.IsNullOrWhiteSpace(gamePath))
                 state.Registry.Add(Capture(@"Software\Microsoft\DirectX\UserGpuPreferences", gamePath));
 
             Storage.SaveState(state);
@@ -714,10 +831,10 @@ namespace GameBoostPro
                 if (!String.Equals(active.Guid, targetPowerGuid, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidOperationException("Windows ไม่ยอมเปลี่ยน Power Plan เป็นโหมดประสิทธิภาพสูง");
 
-                foreach (Tuple<string, string, object, RegistryValueKind> tweak in Tweaks)
+                foreach (Tuple<string, string, object, RegistryValueKind> tweak in enabledTweaks)
                     SetRegistry(tweak.Item1, tweak.Item2, tweak.Item3, tweak.Item4);
 
-                if (!String.IsNullOrWhiteSpace(gamePath))
+                if (options.PreferHighPerformanceGpu && !String.IsNullOrWhiteSpace(gamePath))
                     SetRegistry(@"Software\Microsoft\DirectX\UserGpuPreferences", gamePath,
                         "GpuPreference=2;", RegistryValueKind.String);
 
@@ -742,15 +859,17 @@ namespace GameBoostPro
                 {
                     try
                     {
-                        Process p = Process.GetProcessById(state.GameProcessId);
-                        if (!String.IsNullOrWhiteSpace(state.PreviousPriority))
-                            p.PriorityClass = (ProcessPriorityClass)Enum.Parse(typeof(ProcessPriorityClass), state.PreviousPriority);
-                        SetProcessPriorityBoost(p.Handle, state.PreviousPriorityBoostDisabled);
-                        POWER_THROTTLING_STATE previous = new POWER_THROTTLING_STATE();
-                        previous.Version = 1;
-                        previous.ControlMask = state.HadPowerThrottleState ? state.PreviousThrottleControl : 0;
-                        previous.StateMask = state.HadPowerThrottleState ? state.PreviousThrottleState : 0;
-                        SetProcessInformation(p.Handle, ProcessPowerThrottling, ref previous, Marshal.SizeOf(previous));
+                        using (Process p = Process.GetProcessById(state.GameProcessId))
+                        {
+                            if (!String.IsNullOrWhiteSpace(state.PreviousPriority))
+                                p.PriorityClass = (ProcessPriorityClass)Enum.Parse(typeof(ProcessPriorityClass), state.PreviousPriority);
+                            SetProcessPriorityBoost(p.Handle, state.PreviousPriorityBoostDisabled);
+                            POWER_THROTTLING_STATE previous = new POWER_THROTTLING_STATE();
+                            previous.Version = 1;
+                            previous.ControlMask = state.HadPowerThrottleState ? state.PreviousThrottleControl : 0;
+                            previous.StateMask = state.HadPowerThrottleState ? state.PreviousThrottleState : 0;
+                            SetProcessInformation(p.Handle, ProcessPowerThrottling, ref previous, Marshal.SizeOf(previous));
+                        }
                     }
                     catch { }
                 }
@@ -773,6 +892,7 @@ namespace GameBoostPro
         public static bool ApplyGamePriority(BoostState state)
         {
             if (state == null) return false;
+            if (!state.UseAboveNormalPriority && !state.UseHighQos && !state.UseDynamicPriorityBoost) return true;
             Process game = null;
             if (state.GameProcessId > 0)
             {
@@ -801,25 +921,37 @@ namespace GameBoostPro
                         state.PreviousThrottleState = previous.StateMask;
                     }
 
-                    game.PriorityClass = ProcessPriorityClass.AboveNormal;
-                    SetProcessPriorityBoost(game.Handle, false);
-                    POWER_THROTTLING_STATE highQos = new POWER_THROTTLING_STATE();
-                    highQos.Version = 1;
-                    highQos.ControlMask = PowerThrottlingExecutionSpeed | PowerThrottlingIgnoreTimerResolution;
-                    highQos.StateMask = 0;
-                    SetProcessInformation(game.Handle, ProcessPowerThrottling, ref highQos, Marshal.SizeOf(highQos));
+                    if (state.UseAboveNormalPriority)
+                        game.PriorityClass = ProcessPriorityClass.AboveNormal;
+                    if (state.UseDynamicPriorityBoost)
+                        SetProcessPriorityBoost(game.Handle, false);
+                    if (state.UseHighQos)
+                    {
+                        POWER_THROTTLING_STATE highQos = new POWER_THROTTLING_STATE();
+                        highQos.Version = 1;
+                        highQos.ControlMask = PowerThrottlingExecutionSpeed | PowerThrottlingIgnoreTimerResolution;
+                        highQos.StateMask = 0;
+                        SetProcessInformation(game.Handle, ProcessPowerThrottling, ref highQos, Marshal.SizeOf(highQos));
+                    }
                     state.ProcessTuningApplied = true;
                     Storage.SaveState(state);
                 }
                 return true;
             }
             catch { return false; }
+            finally { if (game != null) game.Dispose(); }
         }
 
         public static void AttachGamePath(BoostState state, string gamePath)
         {
             if (state == null || String.IsNullOrWhiteSpace(gamePath)) return;
             if (String.Equals(state.GamePath, gamePath, StringComparison.OrdinalIgnoreCase)) return;
+            if (!state.PreferHighPerformanceGpu)
+            {
+                state.GamePath = gamePath;
+                Storage.SaveState(state);
+                return;
+            }
 
             bool captured = false;
             foreach (RegistrySnapshot item in state.Registry)
@@ -840,22 +972,46 @@ namespace GameBoostPro
             Storage.SaveState(state);
         }
 
+        private static List<Tuple<string, string, object, RegistryValueKind>> GetEnabledTweaks(AppConfig options)
+        {
+            List<Tuple<string, string, object, RegistryValueKind>> tweaks =
+                new List<Tuple<string, string, object, RegistryValueKind>>();
+            if (options.EnableWindowsGameMode) tweaks.AddRange(GameModeTweaks);
+            if (options.DisableBackgroundCapture) tweaks.AddRange(CaptureTweaks);
+            return tweaks;
+        }
+
         public static Process FindGameProcess(string gamePath)
         {
             if (String.IsNullOrWhiteSpace(gamePath)) return null;
             string processName = Path.GetFileNameWithoutExtension(gamePath);
-            foreach (Process p in Process.GetProcessesByName(processName))
+            Process[] processes = Process.GetProcessesByName(processName);
+            Process result = null;
+            try
             {
-                try
+                foreach (Process process in processes)
                 {
-                    if (String.Equals(p.MainModule.FileName, gamePath, StringComparison.OrdinalIgnoreCase)) return p;
-                }
-                catch
-                {
-                    return p;
+                    try
+                    {
+                        if (String.Equals(process.MainModule.FileName, gamePath, StringComparison.OrdinalIgnoreCase))
+                        {
+                            result = process;
+                            break;
+                        }
+                    }
+                    catch
+                    {
+                        result = process;
+                        break;
+                    }
                 }
             }
-            return null;
+            finally
+            {
+                foreach (Process process in processes)
+                    if (!Object.ReferenceEquals(process, result)) process.Dispose();
+            }
+            return result;
         }
 
         private const int ProcessPowerThrottling = 4;
@@ -1032,6 +1188,12 @@ namespace GameBoostPro
             base.OnKeyDown(e);
         }
 
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) animation.Dispose();
+            base.Dispose(disposing);
+        }
+
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
@@ -1060,7 +1222,7 @@ namespace GameBoostPro
             using (Pen border = new Pen(Color.FromArgb(95, accent), 2f))
                 g.DrawEllipse(border, core);
 
-            string eyebrow = busy ? "กำลังปรับระบบ" : (active ? "GAME MODE  ON" : "READY");
+            string eyebrow = busy ? "กำลังปรับระบบ" : (active ? "GAME MODE  ON" : "STANDBY");
             string action = active ? "RESTORE" : "BOOST";
             string hint = active ? "กลับสู่โหมดปกติ" : "กดเพื่อเร่งเครื่อง";
             DrawCentered(g, eyebrow, new Font("Segoe UI", 9, FontStyle.Bold), Palette.Muted, 119);
@@ -1132,7 +1294,17 @@ namespace GameBoostPro
     {
         private float value;
         public string Caption { get; set; }
-        public float Value { get { return value; } set { this.value = Math.Max(0, Math.Min(100, value)); Invalidate(); } }
+        public float Value
+        {
+            get { return value; }
+            set
+            {
+                float next = Math.Max(0, Math.Min(100, value));
+                if (Math.Abs(next - this.value) < 0.25f) return;
+                this.value = next;
+                Invalidate();
+            }
+        }
 
         public MetricBar()
         {
@@ -1161,18 +1333,26 @@ namespace GameBoostPro
 
     internal sealed class GameLibraryForm : Form
     {
+        private readonly List<GameInstall> catalog;
         private readonly ListView games;
-        private readonly Button selectButton;
+        private readonly TextBox searchBox;
+        private readonly ComboBox sourceFilter;
+        private readonly Label countLabel;
+        private readonly Button folderButton;
+        private readonly Button launchButton;
+        private readonly Button useButton;
         public GameInstall SelectedGame { get; private set; }
+        public bool LaunchRequested { get; private set; }
 
-        public GameLibraryForm(List<GameInstall> catalog)
+        public GameLibraryForm(List<GameInstall> installedGames, string selectedName)
         {
+            catalog = new List<GameInstall>(installedGames ?? new List<GameInstall>());
             Text = "Game Library";
             StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(720, 430);
-            MinimumSize = new Size(720, 430);
-            MaximumSize = new Size(720, 430);
+            ClientSize = new Size(860, 560);
+            FormBorderStyle = FormBorderStyle.FixedSingle;
             MaximizeBox = false;
+            MinimizeBox = false;
             BackColor = Palette.Back;
             ForeColor = Palette.Text;
             Font = new Font("Segoe UI", 9);
@@ -1181,23 +1361,50 @@ namespace GameBoostPro
             {
                 Text = "GAME LIBRARY",
                 Location = new Point(24, 20),
-                Size = new Size(260, 28),
+                Size = new Size(320, 28),
                 Font = new Font("Segoe UI", 15, FontStyle.Bold),
                 ForeColor = Palette.Text
             };
             Controls.Add(title);
             Controls.Add(new Label
             {
-                Text = "พบจาก Steam / Epic / Riot ทั้งหมด " + catalog.Count + " รายการ",
+                Text = "ค้นหา เลือกโปรไฟล์ หรือเปิดเกมได้จากหน้าจอนี้",
                 Location = new Point(25, 52),
-                Size = new Size(430, 22),
+                Size = new Size(540, 22),
                 ForeColor = Palette.Muted
             });
 
+            Controls.Add(CreateLabel("SEARCH", 24, 84, 100, Palette.Muted));
+            searchBox = new TextBox
+            {
+                Location = new Point(24, 105),
+                Size = new Size(610, 32),
+                BackColor = Palette.Surface,
+                ForeColor = Palette.Text,
+                BorderStyle = BorderStyle.FixedSingle,
+                Font = new Font("Segoe UI", 10)
+            };
+            searchBox.TextChanged += delegate { RefreshItems(null); };
+            Controls.Add(searchBox);
+
+            Controls.Add(CreateLabel("SOURCE", 654, 84, 100, Palette.Muted));
+            sourceFilter = new ComboBox
+            {
+                Location = new Point(654, 104),
+                Size = new Size(180, 32),
+                DropDownStyle = ComboBoxStyle.DropDownList,
+                BackColor = Palette.Surface,
+                ForeColor = Palette.Text,
+                FlatStyle = FlatStyle.Flat
+            };
+            sourceFilter.Items.AddRange(new object[] { "ALL", "STEAM", "EPIC", "RIOT", "MANUAL" });
+            sourceFilter.SelectedIndexChanged += delegate { RefreshItems(null); };
+            Controls.Add(sourceFilter);
+
             games = new ListView
             {
-                Location = new Point(24, 88),
-                Size = new Size(672, 270),
+                Location = new Point(24, 154),
+                Size = new Size(810, 300),
                 View = View.Details,
                 FullRowSelect = true,
                 MultiSelect = false,
@@ -1206,40 +1413,174 @@ namespace GameBoostPro
                 ForeColor = Palette.Text,
                 BorderStyle = BorderStyle.FixedSingle
             };
-            games.Columns.Add("GAME", 260);
-            games.Columns.Add("SOURCE", 90);
-            games.Columns.Add("INSTALL LOCATION", 300);
+            games.Columns.Add("GAME", 250);
+            games.Columns.Add("SOURCE", 85);
+            games.Columns.Add("STATUS", 92);
+            games.Columns.Add("INSTALL LOCATION", 360);
             catalog.Sort(delegate(GameInstall left, GameInstall right)
             {
                 return StringComparer.CurrentCultureIgnoreCase.Compare(left.DisplayName, right.DisplayName);
             });
+            games.SelectedIndexChanged += delegate { UpdateActions(); };
+            games.DoubleClick += delegate
+            {
+                if (CanLaunch(GetSelected())) UseSelection(true);
+                else UseSelection(false);
+            };
+            Controls.Add(games);
+
+            countLabel = CreateLabel("", 24, 464, 360, Palette.Muted);
+            Controls.Add(countLabel);
+
+            Button add = CreateButton("ADD EXE", 24, 500, 112, Palette.SurfaceHigh, Palette.Text);
+            add.Click += AddManualGame;
+            Controls.Add(add);
+            folderButton = CreateButton("OPEN FOLDER", 146, 500, 130, Palette.SurfaceHigh, Palette.Text);
+            folderButton.Enabled = false;
+            folderButton.Click += OpenSelectedFolder;
+            Controls.Add(folderButton);
+
+            Button cancel = CreateButton("ยกเลิก", 487, 500, 100, Palette.SurfaceHigh, Palette.Text);
+            cancel.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
+            Controls.Add(cancel);
+            launchButton = CreateButton("PLAY NOW", 596, 500, 112, Palette.SurfaceHigh, Palette.Lime);
+            launchButton.Enabled = false;
+            launchButton.Click += delegate { UseSelection(true); };
+            Controls.Add(launchButton);
+            useButton = CreateButton("USE PROFILE", 718, 500, 116, Palette.Lime, Palette.Back);
+            useButton.Enabled = false;
+            useButton.Click += delegate { UseSelection(false); };
+            Controls.Add(useButton);
+
+            AcceptButton = useButton;
+            CancelButton = cancel;
+            sourceFilter.SelectedIndex = 0;
+            RefreshItems(null);
+            SelectByName(selectedName);
+        }
+
+        private void RefreshItems(GameInstall select)
+        {
+            string query = searchBox.Text.Trim();
+            string source = sourceFilter.SelectedItem == null ? "ALL" : sourceFilter.SelectedItem.ToString();
+            games.BeginUpdate();
+            games.Items.Clear();
             foreach (GameInstall game in catalog)
             {
+                if (source != "ALL" && !String.Equals(source, game.Source, StringComparison.OrdinalIgnoreCase)) continue;
+                if (query.Length > 0 &&
+                    game.DisplayName.IndexOf(query, StringComparison.CurrentCultureIgnoreCase) < 0 &&
+                    game.DirectoryPath.IndexOf(query, StringComparison.CurrentCultureIgnoreCase) < 0) continue;
                 ListViewItem item = new ListViewItem(game.DisplayName);
                 item.SubItems.Add(game.Source);
+                item.SubItems.Add(CanLaunch(game) ? "READY" : "LAUNCHER");
                 item.SubItems.Add(game.DirectoryPath);
                 item.Tag = game;
                 games.Items.Add(item);
+                if (select != null && String.Equals(game.DirectoryPath, select.DirectoryPath,
+                    StringComparison.OrdinalIgnoreCase)) item.Selected = true;
             }
-            games.SelectedIndexChanged += delegate { selectButton.Enabled = games.SelectedItems.Count == 1; };
-            games.DoubleClick += delegate { AcceptSelection(); };
-            Controls.Add(games);
-
-            Button cancel = CreateButton("ยกเลิก", 468, 378, 108, Palette.SurfaceHigh, Palette.Text);
-            cancel.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
-            Controls.Add(cancel);
-            selectButton = CreateButton("เลือกเกม", 586, 378, 110, Palette.Lime, Palette.Back);
-            selectButton.Enabled = false;
-            selectButton.Click += delegate { AcceptSelection(); };
-            Controls.Add(selectButton);
+            games.EndUpdate();
+            countLabel.Text = games.Items.Count + " OF " + catalog.Count + " GAMES";
+            UpdateActions();
         }
 
-        private void AcceptSelection()
+        private void SelectByName(string name)
         {
-            if (games.SelectedItems.Count != 1) return;
-            SelectedGame = games.SelectedItems[0].Tag as GameInstall;
-            DialogResult = SelectedGame == null ? DialogResult.Cancel : DialogResult.OK;
+            if (String.IsNullOrWhiteSpace(name)) return;
+            foreach (ListViewItem item in games.Items)
+            {
+                GameInstall game = item.Tag as GameInstall;
+                if (game != null && String.Equals(game.DisplayName, name, StringComparison.CurrentCultureIgnoreCase))
+                {
+                    item.Selected = true;
+                    item.Focused = true;
+                    item.EnsureVisible();
+                    return;
+                }
+            }
+        }
+
+        private void AddManualGame(object sender, EventArgs e)
+        {
+            using (OpenFileDialog dialog = new OpenFileDialog())
+            {
+                dialog.Title = "เพิ่มไฟล์เกมใน Library";
+                dialog.Filter = "ไฟล์เกม (*.exe)|*.exe";
+                dialog.CheckFileExists = true;
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                GameInstall added = new GameInstall
+                {
+                    DisplayName = Path.GetFileNameWithoutExtension(dialog.FileName),
+                    DirectoryPath = Path.GetDirectoryName(dialog.FileName),
+                    Source = "MANUAL",
+                    LaunchTarget = dialog.FileName,
+                    LaunchArguments = ""
+                };
+                foreach (GameInstall existing in catalog)
+                {
+                    if (!String.Equals(existing.LaunchTarget, added.LaunchTarget, StringComparison.OrdinalIgnoreCase)) continue;
+                    searchBox.Text = "";
+                    sourceFilter.SelectedItem = "ALL";
+                    RefreshItems(existing);
+                    return;
+                }
+                catalog.Add(added);
+                catalog.Sort(delegate(GameInstall left, GameInstall right)
+                {
+                    return StringComparer.CurrentCultureIgnoreCase.Compare(left.DisplayName, right.DisplayName);
+                });
+                searchBox.Text = "";
+                sourceFilter.SelectedItem = "ALL";
+                RefreshItems(added);
+            }
+        }
+
+        private void OpenSelectedFolder(object sender, EventArgs e)
+        {
+            GameInstall game = GetSelected();
+            if (game == null || !Directory.Exists(game.DirectoryPath)) return;
+            try { Process.Start(new ProcessStartInfo("explorer.exe", "\"" + game.DirectoryPath + "\"")); }
+            catch { }
+        }
+
+        private void UseSelection(bool launch)
+        {
+            SelectedGame = GetSelected();
+            if (SelectedGame == null || (launch && !CanLaunch(SelectedGame))) return;
+            LaunchRequested = launch;
+            DialogResult = DialogResult.OK;
             Close();
+        }
+
+        private GameInstall GetSelected()
+        {
+            return games.SelectedItems.Count == 1 ? games.SelectedItems[0].Tag as GameInstall : null;
+        }
+
+        private void UpdateActions()
+        {
+            GameInstall selected = GetSelected();
+            useButton.Enabled = selected != null;
+            launchButton.Enabled = CanLaunch(selected);
+            folderButton.Enabled = selected != null && Directory.Exists(selected.DirectoryPath);
+        }
+
+        private static bool CanLaunch(GameInstall game)
+        {
+            if (game == null || String.IsNullOrWhiteSpace(game.LaunchTarget)) return false;
+            return game.LaunchTarget.IndexOf("://", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                File.Exists(game.LaunchTarget);
+        }
+
+        private static Label CreateLabel(string text, int x, int y, int width, Color color)
+        {
+            return new Label
+            {
+                Text = text, Location = new Point(x, y), Size = new Size(width, 20),
+                ForeColor = color, BackColor = Color.Transparent,
+                Font = new Font("Segoe UI", 8, FontStyle.Bold)
+            };
         }
 
         private static Button CreateButton(string text, int x, int y, int width, Color back, Color fore)
@@ -1260,41 +1601,162 @@ namespace GameBoostPro
         }
     }
 
+    internal sealed class AdvancedSettingsForm : Form
+    {
+        private readonly AppConfig config;
+        private readonly ToggleSwitch gameMode;
+        private readonly ToggleSwitch capture;
+        private readonly ToggleSwitch gpu;
+        private readonly ToggleSwitch priority;
+        private readonly ToggleSwitch highQos;
+        private readonly ToggleSwitch priorityBoost;
+
+        public AdvancedSettingsForm(AppConfig source)
+        {
+            config = source;
+            Text = "Advanced Mode";
+            StartPosition = FormStartPosition.CenterParent;
+            ClientSize = new Size(650, 530);
+            FormBorderStyle = FormBorderStyle.FixedSingle;
+            MaximizeBox = false;
+            MinimizeBox = false;
+            BackColor = Palette.Back;
+            ForeColor = Palette.Text;
+            Font = new Font("Segoe UI", 9);
+
+            Controls.Add(CreateLabel("ADVANCED MODE", 26, 20, 300, 32, 16, FontStyle.Bold, Palette.Text));
+            Controls.Add(CreateLabel("Best Mode เปิดทุกระบบ ค่า Custom จะถูกใช้ใน Boost รอบถัดไป", 27, 55, 530, 22,
+                9, FontStyle.Regular, Palette.Muted));
+
+            Panel power = new Panel { Location = new Point(26, 91), Size = new Size(598, 54), BackColor = Palette.SurfaceHigh };
+            power.Controls.Add(CreateLabel("POWER PLAN", 14, 8, 130, 18, 8, FontStyle.Bold, Palette.Amber));
+            power.Controls.Add(CreateLabel("ULTIMATE PERFORMANCE / AUTO-CREATE", 14, 27, 390, 20, 9,
+                FontStyle.Bold, Palette.Lime));
+            Controls.Add(power);
+
+            int y = 160;
+            gameMode = AddSetting("Windows Game Mode", "ให้ Windows จัดลำดับทรัพยากรสำหรับเกม", y, source.EnableWindowsGameMode);
+            capture = AddSetting("Disable background capture", "หยุด Game DVR และการอัดหน้าจอเบื้องหลัง", y += 52, source.DisableBackgroundCapture);
+            gpu = AddSetting("High-performance GPU", "กำหนด GPU ประสิทธิภาพสูงให้ไฟล์เกม", y += 52, source.PreferHighPerformanceGpu);
+            priority = AddSetting("AboveNormal priority", "เพิ่มลำดับ CPU โดยไม่ใช้ High หรือ Realtime", y += 52, source.UseAboveNormalPriority);
+            highQos = AddSetting("HighQoS", "ปิด Power Throttling เฉพาะโปรเซสเกม", y += 52, source.UseHighQos);
+            priorityBoost = AddSetting("Dynamic priority boost", "เปิดกลไกตอบสนองระยะสั้นของ Windows", y += 52, source.UseDynamicPriorityBoost);
+
+            Button reset = CreateButton("RESET BEST", 26, 480, 122, Palette.SurfaceHigh, Palette.Text);
+            reset.Click += delegate
+            {
+                gameMode.Value = capture.Value = gpu.Value = priority.Value = highQos.Value = priorityBoost.Value = true;
+            };
+            Controls.Add(reset);
+            Button cancel = CreateButton("ยกเลิก", 408, 480, 96, Palette.SurfaceHigh, Palette.Text);
+            cancel.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
+            Controls.Add(cancel);
+            Button save = CreateButton("SAVE", 514, 480, 110, Palette.Lime, Palette.Back);
+            save.Click += delegate
+            {
+                config.EnableWindowsGameMode = gameMode.Value;
+                config.DisableBackgroundCapture = capture.Value;
+                config.PreferHighPerformanceGpu = gpu.Value;
+                config.UseAboveNormalPriority = priority.Value;
+                config.UseHighQos = highQos.Value;
+                config.UseDynamicPriorityBoost = priorityBoost.Value;
+                Storage.SaveConfig(config);
+                DialogResult = DialogResult.OK;
+                Close();
+            };
+            Controls.Add(save);
+        }
+
+        private ToggleSwitch AddSetting(string title, string detail, int y, bool value)
+        {
+            Controls.Add(CreateLabel(title, 28, y, 300, 22, 10, FontStyle.Bold, Palette.Text));
+            Controls.Add(CreateLabel(detail, 28, y + 23, 490, 20, 8, FontStyle.Regular, Palette.Muted));
+            ToggleSwitch toggle = new ToggleSwitch { Location = new Point(566, y + 8), Value = value };
+            Controls.Add(toggle);
+            return toggle;
+        }
+
+        private static Label CreateLabel(string text, int x, int y, int width, int height, float size,
+            FontStyle style, Color color)
+        {
+            return new Label
+            {
+                Text = text, Location = new Point(x, y), Size = new Size(width, height),
+                Font = new Font("Segoe UI", size, style), ForeColor = color, BackColor = Color.Transparent
+            };
+        }
+
+        private static Button CreateButton(string text, int x, int y, int width, Color back, Color fore)
+        {
+            Button button = new Button
+            {
+                Text = text, Location = new Point(x, y), Size = new Size(width, 34), BackColor = back,
+                ForeColor = fore, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            button.FlatAppearance.BorderSize = 0;
+            return button;
+        }
+    }
+
     internal sealed class GpuUsageReader : IDisposable
     {
-        private readonly List<PerformanceCounter> counters = new List<PerformanceCounter>();
+        private readonly PerformanceCounterCategory category;
+        private Dictionary<string, CounterSample> previous = new Dictionary<string, CounterSample>();
 
         public GpuUsageReader()
         {
-            try
-            {
-                PerformanceCounterCategory category = new PerformanceCounterCategory("GPU Engine");
-                foreach (string instance in category.GetInstanceNames())
-                {
-                    if (instance.IndexOf("engtype_3D", StringComparison.OrdinalIgnoreCase) < 0) continue;
-                    PerformanceCounter counter = new PerformanceCounter("GPU Engine", "Utilization Percentage", instance);
-                    try { counter.NextValue(); counters.Add(counter); }
-                    catch { counter.Dispose(); }
-                }
-            }
-            catch { }
+            try { category = new PerformanceCounterCategory("GPU Engine"); }
+            catch { category = null; }
         }
 
         public float NextValue()
         {
+            if (category == null) return 0;
+            Dictionary<string, CounterSample> current = new Dictionary<string, CounterSample>();
             float total = 0;
-            foreach (PerformanceCounter counter in counters)
+            try
             {
-                try { total += counter.NextValue(); } catch { }
+                InstanceDataCollection values = category.ReadCategory()["Utilization Percentage"];
+                foreach (string name in values.Keys)
+                {
+                    if (name.IndexOf("engtype_3D", StringComparison.OrdinalIgnoreCase) < 0) continue;
+                    CounterSample sample = values[name].Sample;
+                    current[name] = sample;
+                    CounterSample old;
+                    if (previous.TryGetValue(name, out old))
+                    {
+                        float value = CounterSample.Calculate(old, sample);
+                        if (!Single.IsNaN(value) && !Single.IsInfinity(value) && value > 0) total += value;
+                    }
+                }
+                previous = current;
             }
+            catch { return 0; }
             return Math.Max(0, Math.Min(100, total));
         }
 
         public void Dispose()
         {
-            foreach (PerformanceCounter counter in counters) counter.Dispose();
-            counters.Clear();
+            previous.Clear();
         }
+    }
+
+    internal sealed class MonitorSnapshot
+    {
+        public float Cpu { get; set; }
+        public float Memory { get; set; }
+        public float Gpu { get; set; }
+        public DetectedGame Game { get; set; }
+        public BoostState State { get; set; }
+    }
+
+    internal sealed class BoostTransitionResult
+    {
+        public bool WasRestore { get; set; }
+        public bool ShouldLaunch { get; set; }
+        public string Activity { get; set; }
+        public Exception Error { get; set; }
     }
 
     internal sealed class MainForm : Form
@@ -1314,7 +1776,7 @@ namespace GameBoostPro
         private readonly Button browseButton;
         private readonly Button libraryButton;
         private readonly Button launchButton;
-        private readonly Button adminButton;
+        private readonly Button advancedButton;
         private readonly MetricBar cpuBar;
         private readonly MetricBar ramBar;
         private readonly MetricBar gpuBar;
@@ -1322,7 +1784,9 @@ namespace GameBoostPro
         private readonly PerformanceCounter cpuCounter;
         private readonly GpuUsageReader gpuReader;
         private readonly NotifyIcon tray;
-        private bool working;
+        private readonly object systemLock = new object();
+        private volatile bool working;
+        private int monitorInFlight;
         private bool allowClose;
         private int missingGameTicks;
         private DetectedGame detectedGame;
@@ -1331,14 +1795,12 @@ namespace GameBoostPro
         {
             config = Storage.LoadConfig();
             platform = PlatformDetector.Detect();
-            GameDetector.RefreshCatalog();
             Text = "Game Boost Pro";
             Icon appIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             if (appIcon != null) Icon = appIcon;
             StartPosition = FormStartPosition.CenterScreen;
             ClientSize = new Size(900, 610);
-            MinimumSize = new Size(900, 610);
-            MaximumSize = new Size(900, 610);
+            FormBorderStyle = FormBorderStyle.FixedSingle;
             MaximizeBox = false;
             BackColor = Palette.Back;
             ForeColor = Palette.Text;
@@ -1353,14 +1815,14 @@ namespace GameBoostPro
             pro.BringToFront();
             Controls.Add(MakeLabel("Performance control / reversible profile", 30, 52, 320, 20, 8, FontStyle.Regular, Palette.Muted));
             Controls.Add(MakeLabel(platform.Title, 390, 52, 315, 20, 8, FontStyle.Bold,
-                platform.IsSupported ? Palette.Lime : Palette.Coral));
+                platform.IsSupported ? Palette.Cyan : Palette.Coral));
 
-            adminButton = MakeButton(SystemTuner.IsAdmin() ? "ADMIN READY" : "ADMIN BOOST", 730, 25, 138, 30,
-                SystemTuner.IsAdmin() ? Palette.SurfaceHigh : Palette.Amber,
-                SystemTuner.IsAdmin() ? Palette.Lime : Palette.Back);
-            adminButton.Enabled = !SystemTuner.IsAdmin();
-            adminButton.Click += RestartElevated;
-            Controls.Add(adminButton);
+            advancedButton = MakeButton("ADVANCED", 708, 23, 160, 34, Palette.SurfaceHigh, Palette.Lime);
+            advancedButton.Click += OpenAdvancedSettings;
+            Controls.Add(advancedButton);
+            Label adminStatus = MakeLabel("ADMIN ACTIVE", 742, 59, 126, 17, 7, FontStyle.Bold, Palette.Muted);
+            adminStatus.TextAlign = ContentAlignment.MiddleRight;
+            Controls.Add(adminStatus);
 
             Panel line = new Panel { BackColor = Palette.Line, Location = new Point(30, 86), Size = new Size(838, 1) };
             Controls.Add(line);
@@ -1470,7 +1932,15 @@ namespace GameBoostPro
                 }
             };
             FormClosing += OnFormClosing;
-            FormClosed += delegate { gpuReader.Dispose(); cpuCounter.Dispose(); };
+            FormClosed += delegate
+            {
+                monitor.Stop();
+                monitor.Dispose();
+                if (detectedGame != null && detectedGame.Process != null) detectedGame.Process.Dispose();
+                gpuReader.Dispose();
+                cpuCounter.Dispose();
+                tray.Dispose();
+            };
 
             autoSwitch.Value = config.AutoMode;
             launchCheck.Checked = config.LaunchOnBoost;
@@ -1482,10 +1952,12 @@ namespace GameBoostPro
                 dial.Enabled = false;
                 Storage.SaveConfig(config);
             }
+            RefreshAdvancedButton();
             RefreshGameProfile();
             RefreshState(platform.IsSupported
                 ? platform.Detail
                 : platform.Detail + " / รองรับเฉพาะ Acer + NitroSense และ Desktop PC");
+            RefreshCatalogAsync();
         }
 
         private void BrowseGame(object sender, EventArgs e)
@@ -1504,6 +1976,7 @@ namespace GameBoostPro
                     config.LibraryGameName = "";
                     config.LibraryGameDirectory = "";
                     config.LibraryLaunchTarget = "";
+                    config.LibraryLaunchArguments = "";
                     Storage.SaveConfig(config);
                     RefreshGameProfile();
                     RefreshState("บันทึกโปรไฟล์ " + Path.GetFileNameWithoutExtension(config.GamePath) + " แล้ว");
@@ -1513,17 +1986,38 @@ namespace GameBoostPro
 
         private void OpenGameLibrary(object sender, EventArgs e)
         {
-            GameDetector.RefreshCatalog();
-            using (GameLibraryForm dialog = new GameLibraryForm(GameDetector.GetCatalog()))
+            List<GameInstall> catalog = GameDetector.GetCatalog();
+            if (!String.IsNullOrWhiteSpace(config.LibraryGameName) &&
+                !String.IsNullOrWhiteSpace(config.LibraryLaunchTarget) &&
+                String.IsNullOrWhiteSpace(config.LibraryLaunchArguments) && File.Exists(config.LibraryLaunchTarget))
+            {
+                bool exists = false;
+                foreach (GameInstall game in catalog)
+                    if (String.Equals(game.LaunchTarget, config.LibraryLaunchTarget, StringComparison.OrdinalIgnoreCase))
+                        exists = true;
+                if (!exists)
+                    catalog.Add(new GameInstall
+                    {
+                        DisplayName = config.LibraryGameName,
+                        DirectoryPath = config.LibraryGameDirectory,
+                        Source = "MANUAL",
+                        LaunchTarget = config.LibraryLaunchTarget,
+                        LaunchArguments = ""
+                    });
+            }
+            using (GameLibraryForm dialog = new GameLibraryForm(catalog, config.LibraryGameName))
             {
                 if (dialog.ShowDialog(this) != DialogResult.OK || dialog.SelectedGame == null) return;
                 config.LibraryGameName = dialog.SelectedGame.DisplayName;
                 config.LibraryGameDirectory = dialog.SelectedGame.DirectoryPath;
                 config.LibraryLaunchTarget = dialog.SelectedGame.LaunchTarget;
-                config.GamePath = "";
+                config.LibraryLaunchArguments = dialog.SelectedGame.LaunchArguments;
+                config.GamePath = String.Equals(dialog.SelectedGame.Source, "MANUAL", StringComparison.OrdinalIgnoreCase)
+                    ? dialog.SelectedGame.LaunchTarget : "";
                 Storage.SaveConfig(config);
                 RefreshGameProfile();
                 RefreshState("เลือก " + config.LibraryGameName + " จาก " + dialog.SelectedGame.Source + " แล้ว");
+                if (dialog.LaunchRequested) LaunchGame();
             }
         }
 
@@ -1539,19 +2033,37 @@ namespace GameBoostPro
             }
             try
             {
-                ProcessStartInfo info;
                 if (SystemTuner.IsAdmin())
-                    info = new ProcessStartInfo("explorer.exe", "\"" + target + "\"");
+                    LaunchThroughDesktopShell(target, config.LibraryLaunchArguments);
                 else
                 {
-                    info = new ProcessStartInfo(target);
+                    ProcessStartInfo info = new ProcessStartInfo(target);
                     info.UseShellExecute = true;
+                    info.Arguments = config.LibraryLaunchArguments ?? "";
                     if (File.Exists(target)) info.WorkingDirectory = Path.GetDirectoryName(target);
+                    Process.Start(info);
                 }
-                Process.Start(info);
                 RefreshState("กำลังเปิด " + GetConfiguredGameName());
             }
             catch (Exception ex) { ShowError("เปิดเกมไม่สำเร็จ: " + ex.Message); }
+        }
+
+        private static void LaunchThroughDesktopShell(string target, string arguments)
+        {
+            object shell = null;
+            try
+            {
+                Type shellType = Type.GetTypeFromProgID("Shell.Application");
+                if (shellType == null) throw new InvalidOperationException("ไม่พบ Windows Desktop Shell");
+                shell = Activator.CreateInstance(shellType);
+                string directory = File.Exists(target) ? Path.GetDirectoryName(target) : "";
+                shellType.InvokeMember("ShellExecute", System.Reflection.BindingFlags.InvokeMethod, null, shell,
+                    new object[] { target, arguments ?? "", directory, "open", 1 });
+            }
+            finally
+            {
+                if (shell != null && Marshal.IsComObject(shell)) Marshal.FinalReleaseComObject(shell);
+            }
         }
 
         private void ToggleBoost(bool autoTriggered)
@@ -1565,50 +2077,136 @@ namespace GameBoostPro
             working = true;
             dial.Busy = true;
             SetControlsEnabled(false);
+            bool restore = Storage.HasState();
+            DetectedGame candidate = detectedGame;
+            string targetPath = candidate != null && !String.IsNullOrWhiteSpace(candidate.ExePath)
+                ? candidate.ExePath : config.GamePath;
+            int processId = candidate != null && candidate.Process != null ? candidate.Process.Id : 0;
+            bool shouldLaunch = config.LaunchOnBoost && !autoTriggered && !restore;
 
-            try
+            Task.Factory.StartNew(delegate
             {
-                if (Storage.HasState())
+                BoostTransitionResult result = new BoostTransitionResult
                 {
-                    SystemTuner.Disable();
-                    RefreshState(autoTriggered ? "เกมปิดแล้ว คืนค่าเครื่องเรียบร้อย" : "คืนค่าเครื่องกลับเป็นปกติแล้ว");
-                }
-                else
+                    WasRestore = restore,
+                    ShouldLaunch = shouldLaunch
+                };
+                try
                 {
-                    DetectedGame candidate = detectedGame ?? GameDetector.FindRunningGame(config.GamePath);
-                    string targetPath = candidate != null && !String.IsNullOrWhiteSpace(candidate.ExePath)
-                        ? candidate.ExePath : config.GamePath;
-                    int processId = candidate != null && candidate.Process != null ? candidate.Process.Id : 0;
-                    SystemTuner.Enable(targetPath, autoTriggered, processId, platform);
-                    if (config.LaunchOnBoost && !autoTriggered) LaunchGame();
-                    RefreshState(autoTriggered && candidate != null
-                        ? "ตรวจพบ " + candidate.DisplayName + " / เปิด Boost 6 ระบบแล้ว"
-                        : "Game Mode พร้อมลุย / รอจับโปรเซสเกม");
+                    lock (systemLock)
+                    {
+                        if (restore) SystemTuner.Disable();
+                        else SystemTuner.Enable(targetPath, autoTriggered, processId, platform, config);
+                    }
+                    result.Activity = restore
+                        ? (autoTriggered ? "เกมปิดแล้ว คืนค่าเครื่องเรียบร้อย" : "คืนค่าเครื่องกลับเป็นปกติแล้ว")
+                        : (autoTriggered && candidate != null
+                            ? "ตรวจพบ " + candidate.DisplayName + " / เปิด Best Mode แล้ว"
+                            : "Best Mode พร้อมทำงาน / รอจับโปรเซสเกม");
                 }
-            }
-            catch (Exception ex)
+                catch (Exception ex) { result.Error = ex; }
+                return result;
+            }).ContinueWith(delegate(Task<BoostTransitionResult> task)
             {
-                RefreshState("ตรวจพบปัญหา กรุณาดูข้อความแจ้งเตือน");
-                ShowError(ex.Message);
-            }
-            finally
-            {
-                working = false;
-                dial.Busy = false;
-                SetControlsEnabled(true);
-                UpdateStateVisuals();
-            }
+                try
+                {
+                    BeginInvoke(new Action(delegate
+                    {
+                        BoostTransitionResult result = task.Status == TaskStatus.RanToCompletion
+                            ? task.Result : new BoostTransitionResult { Error = task.Exception };
+                        if (result.Error == null)
+                        {
+                            if (result.ShouldLaunch) LaunchGame();
+                            RefreshState(result.Activity);
+                        }
+                        else
+                        {
+                            RefreshState("ตรวจพบปัญหา กรุณาดูข้อความแจ้งเตือน");
+                            ShowError(result.Error.GetBaseException().Message);
+                        }
+                        working = false;
+                        dial.Busy = false;
+                        SetControlsEnabled(true);
+                        UpdateStateVisuals();
+                    }));
+                }
+                catch { working = false; }
+            });
         }
 
         private void MonitorTick(object sender, EventArgs e)
         {
-            UpdateMetrics();
+            if (System.Threading.Interlocked.Exchange(ref monitorInFlight, 1) != 0) return;
+            Task.Factory.StartNew<MonitorSnapshot>(new Func<MonitorSnapshot>(BuildMonitorSnapshot)).ContinueWith(delegate(Task<MonitorSnapshot> task)
+            {
+                try
+                {
+                    if (IsDisposed || Disposing)
+                    {
+                        System.Threading.Interlocked.Exchange(ref monitorInFlight, 0);
+                        return;
+                    }
+                    BeginInvoke(new Action(delegate
+                    {
+                        System.Threading.Interlocked.Exchange(ref monitorInFlight, 0);
+                        if (task.Status == TaskStatus.RanToCompletion) ApplyMonitorSnapshot(task.Result);
+                    }));
+                }
+                catch { System.Threading.Interlocked.Exchange(ref monitorInFlight, 0); }
+            });
+        }
+
+        private MonitorSnapshot BuildMonitorSnapshot()
+        {
+            MonitorSnapshot snapshot = new MonitorSnapshot();
+            try { snapshot.Cpu = cpuCounter.NextValue(); } catch { }
+            try { snapshot.Gpu = gpuReader.NextValue(); } catch { }
+            MEMORYSTATUSEX memory = new MEMORYSTATUSEX();
+            if (GlobalMemoryStatusEx(memory)) snapshot.Memory = memory.dwMemoryLoad;
+            if (working) return snapshot;
+
+            snapshot.Game = GameDetector.FindRunningGame(config.GamePath);
+            try { snapshot.State = Storage.LoadState(); } catch { }
+
+            if (snapshot.Game != null && snapshot.State != null && !working)
+            {
+                lock (systemLock)
+                {
+                    try
+                    {
+                        BoostState latest = Storage.LoadState();
+                        if (latest != null)
+                        {
+                            if (!String.IsNullOrWhiteSpace(snapshot.Game.ExePath))
+                                SystemTuner.AttachGamePath(latest, snapshot.Game.ExePath);
+                            if (!latest.ProcessTuningApplied || latest.GameProcessId != snapshot.Game.Process.Id)
+                            {
+                                latest.GameProcessId = snapshot.Game.Process.Id;
+                                Storage.SaveState(latest);
+                            }
+                            SystemTuner.ApplyGamePriority(latest);
+                            snapshot.State = latest;
+                        }
+                    }
+                    catch { }
+                }
+            }
+            return snapshot;
+        }
+
+        private void ApplyMonitorSnapshot(MonitorSnapshot snapshot)
+        {
+            cpuBar.Value = snapshot.Cpu;
+            ramBar.Value = snapshot.Memory;
+            gpuBar.Value = snapshot.Gpu;
             if (working) return;
 
-            detectedGame = GameDetector.FindRunningGame(config.GamePath);
+            if (detectedGame != null && detectedGame.Process != null &&
+                (snapshot.Game == null || !Object.ReferenceEquals(detectedGame.Process, snapshot.Game.Process)))
+                detectedGame.Process.Dispose();
+            detectedGame = snapshot.Game;
             bool running = detectedGame != null;
-            BoostState state = null;
-            try { state = Storage.LoadState(); } catch { }
+            BoostState state = snapshot.State;
 
             if (running)
             {
@@ -1618,17 +2216,6 @@ namespace GameBoostPro
                 {
                     ToggleBoost(true);
                     return;
-                }
-                if (state != null)
-                {
-                    if (!String.IsNullOrWhiteSpace(detectedGame.ExePath))
-                        SystemTuner.AttachGamePath(state, detectedGame.ExePath);
-                    if (!state.ProcessTuningApplied || state.GameProcessId != detectedGame.Process.Id)
-                    {
-                        state.GameProcessId = detectedGame.Process.Id;
-                        Storage.SaveState(state);
-                    }
-                    SystemTuner.ApplyGamePriority(state);
                 }
             }
             else if (state != null && state.AutoTriggered)
@@ -1665,10 +2252,31 @@ namespace GameBoostPro
                 !String.IsNullOrWhiteSpace(config.LibraryGameDirectory) && Directory.Exists(config.LibraryGameDirectory);
             gameName.ForeColor = Palette.Text;
             gameName.Text = libraryValid ? "พร้อมเล่น: " + config.LibraryGameName : "พร้อมตรวจจับเกมอัตโนมัติ";
-            gamePath.Text = "พบเกมในคลัง " + GameDetector.InstalledCount + " รายการ" +
+            string catalogStatus = GameDetector.IsCatalogLoaded
+                ? "พบเกมในคลัง " + GameDetector.InstalledCount + " รายการ"
+                : "กำลังอ่านคลัง Steam / Epic / Riot";
+            gamePath.Text = catalogStatus +
                 (manualValid ? " / สำรอง: " + Path.GetFileNameWithoutExtension(config.GamePath) :
                 libraryValid ? " / " + config.LibraryGameDirectory : "");
             launchButton.Enabled = CanLaunchConfiguredGame();
+        }
+
+        private void RefreshCatalogAsync()
+        {
+            libraryButton.Enabled = false;
+            Task.Factory.StartNew(delegate { GameDetector.RefreshCatalog(); }).ContinueWith(delegate(Task task)
+            {
+                try
+                {
+                    if (IsDisposed || Disposing) return;
+                    BeginInvoke(new Action(delegate
+                    {
+                        libraryButton.Enabled = !working && GameDetector.IsCatalogLoaded;
+                        RefreshGameProfile();
+                    }));
+                }
+                catch { }
+            });
         }
 
         private string GetConfiguredGameName()
@@ -1681,18 +2289,20 @@ namespace GameBoostPro
         private bool CanLaunchConfiguredGame()
         {
             if (!String.IsNullOrWhiteSpace(config.LibraryGameName))
-                return !String.IsNullOrWhiteSpace(config.LibraryLaunchTarget);
+                return !String.IsNullOrWhiteSpace(config.LibraryLaunchTarget) &&
+                    (config.LibraryLaunchTarget.IndexOf("://", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    File.Exists(config.LibraryLaunchTarget));
             return !String.IsNullOrWhiteSpace(config.GamePath) && File.Exists(config.GamePath);
         }
 
         private void ShowDetectedGame(DetectedGame game)
         {
             gameName.Text = "ตรวจพบ: " + game.DisplayName;
-            gameName.ForeColor = Palette.Lime;
+            gameName.ForeColor = Palette.Cyan;
             string detail = game.Source + " / " + Path.GetFileName(game.ExePath ?? "กำลังทำงาน");
             gamePath.Text = detail;
             activityText.Text = Storage.HasState()
-                ? game.DisplayName + " กำลังใช้ HighQoS + AboveNormal"
+                ? game.DisplayName + " / Ultimate + Tuning " + GetAdvancedOptionCount() + "/6"
                 : "พบ " + game.DisplayName + " / กำลังเตรียม Boost";
         }
 
@@ -1709,43 +2319,61 @@ namespace GameBoostPro
             stateText.Text = active
                 ? "เครื่องอยู่ในโหมดเล่นเกม\nกดอีกครั้งเพื่อคืนค่าทุกอย่าง"
                 : "เครื่องอยู่ในโหมดปกติ\nค่าทุกอย่างพร้อมถูกจดจำก่อน Boost";
-            SetStatus(powerStatus, active, active ? "POWER MAX" : "POWER NORMAL");
-            SetStatus(modeStatus, active, active ? "HIGHQOS ON" : "HIGHQOS READY");
-            SetStatus(captureStatus, active, active ? "CAPTURE OFF" : "CAPTURE NORMAL");
+            int optionCount = GetAdvancedOptionCount();
+            SetStatus(powerStatus, active, active ? "ULTIMATE ON" : "ULTIMATE READY");
+            SetStatus(modeStatus, active, active ? "TUNING " + optionCount + "/6" :
+                (optionCount == 6 ? "BEST 6/6" : "CUSTOM " + optionCount + "/6"), Palette.Cyan);
+            SetStatus(captureStatus, active && config.DisableBackgroundCapture,
+                config.DisableBackgroundCapture ? (active ? "CAPTURE OFF" : "CAPTURE READY") : "CAPTURE KEEP",
+                Palette.Amber);
             tray.Text = active ? "Game Boost Pro - Game Mode ON" : "Game Boost Pro - Normal";
+            advancedButton.Enabled = !active && !working;
         }
 
         private void SetControlsEnabled(bool enabled)
         {
             browseButton.Enabled = enabled;
-            libraryButton.Enabled = enabled;
+            libraryButton.Enabled = enabled && GameDetector.IsCatalogLoaded;
             autoSwitch.Enabled = enabled && platform.IsSupported;
             launchCheck.Enabled = enabled;
-            adminButton.Enabled = enabled && !SystemTuner.IsAdmin();
+            advancedButton.Enabled = enabled && !Storage.HasState();
             launchButton.Enabled = enabled && CanLaunchConfiguredGame();
         }
 
-        private void RestartElevated(object sender, EventArgs e)
+        private void OpenAdvancedSettings(object sender, EventArgs e)
         {
             if (Storage.HasState())
             {
-                ShowError("กรุณากด RESTORE ก่อนเปลี่ยนเป็น Admin Boost");
+                ShowError("กรุณากด RESTORE ก่อนเปลี่ยน Advanced Mode");
                 return;
             }
-            try
+            using (AdvancedSettingsForm dialog = new AdvancedSettingsForm(config))
             {
-                ProcessStartInfo info = new ProcessStartInfo(Application.ExecutablePath);
-                info.UseShellExecute = true;
-                info.Verb = "runas";
-                Process.Start(info);
-                allowClose = true;
-                tray.Visible = false;
-                Close();
+                if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                RefreshAdvancedButton();
+                RefreshState(GetAdvancedOptionCount() == 6
+                    ? "Advanced Mode: BEST / เปิดครบทุกระบบ"
+                    : "Advanced Mode: CUSTOM " + GetAdvancedOptionCount() + "/6");
             }
-            catch
-            {
-                RefreshState("ยกเลิก Admin Boost / ยังใช้โหมดปกติได้");
-            }
+        }
+
+        private void RefreshAdvancedButton()
+        {
+            int enabled = GetAdvancedOptionCount();
+            advancedButton.Text = enabled == 6 ? "ADVANCED  BEST" : "ADVANCED  " + enabled + "/6";
+            advancedButton.ForeColor = enabled == 6 ? Palette.Lime : Palette.Amber;
+        }
+
+        private int GetAdvancedOptionCount()
+        {
+            int enabled = 0;
+            if (config.EnableWindowsGameMode) enabled++;
+            if (config.DisableBackgroundCapture) enabled++;
+            if (config.PreferHighPerformanceGpu) enabled++;
+            if (config.UseAboveNormalPriority) enabled++;
+            if (config.UseHighQos) enabled++;
+            if (config.UseDynamicPriorityBoost) enabled++;
+            return enabled;
         }
 
         private void ShowFromTray()
@@ -1830,8 +2458,13 @@ namespace GameBoostPro
 
         private static void SetStatus(Label label, bool active, string text)
         {
+            SetStatus(label, active, text, Palette.Lime);
+        }
+
+        private static void SetStatus(Label label, bool active, string text, Color activeColor)
+        {
             label.Text = text;
-            label.ForeColor = active ? Palette.Lime : Palette.Muted;
+            label.ForeColor = active ? activeColor : Palette.Muted;
         }
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Auto)]
