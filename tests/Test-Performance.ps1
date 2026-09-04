@@ -9,7 +9,8 @@ $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 if (-not (Test-Path $app)) { & (Join-Path $root 'build.ps1') }
 
 try {
-    & $csc /nologo /target:exe /out:$probe /reference:System.dll /reference:System.Windows.Forms.dll `
+    & $csc /nologo /target:exe /out:$probe /reference:System.dll /reference:System.Drawing.dll `
+        /reference:System.Windows.Forms.dll `
         (Join-Path $root 'tests\GuiPerfProbe.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Performance probe build failed' }
 

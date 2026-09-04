@@ -50,7 +50,7 @@ Copy-Item "$dist\GameBoostPro.exe" $portable -Force
 Copy-Item "$root\README.txt" $portable -Force
 Copy-Item "$root\LICENSE" $portable -Force
 
-$zip = Join-Path $dist 'GameBoostPro-Portable-v3.1.0.zip'
+$zip = Join-Path $dist 'GameBoostPro-Portable-v3.1.1.zip'
 if (Test-Path $zip) { Remove-Item -LiteralPath $zip -Force }
 Compress-Archive -Path "$portable\*" -DestinationPath $zip -CompressionLevel Optimal
 

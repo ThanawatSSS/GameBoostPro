@@ -11,15 +11,15 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Game Boost Pro Setup")]
 [assembly: AssemblyProduct("Game Boost Pro")]
 [assembly: AssemblyCompany("Game Boost Pro")]
-[assembly: AssemblyVersion("3.1.0.0")]
-[assembly: AssemblyFileVersion("3.1.0.0")]
+[assembly: AssemblyVersion("3.1.1.0")]
+[assembly: AssemblyFileVersion("3.1.1.0")]
 
 namespace GameBoostProSetup
 {
     internal static class Product
     {
         public const string Name = "Game Boost Pro";
-        public const string Version = "3.1.0";
+        public const string Version = "3.1.1";
         public const string FolderName = "Game Boost Pro";
         public const string AppFile = "GameBoostPro.exe";
         public const string ReadmeFile = "README.txt";
@@ -133,7 +133,7 @@ namespace GameBoostProSetup
                 CreateShortcuts();
                 RegisterUninstaller();
                 installed = true;
-                status.Text = "ติดตั้ง Game Boost Pro 3.1 เรียบร้อยแล้ว";
+                status.Text = "ติดตั้ง Game Boost Pro 3.1.1 เรียบร้อยแล้ว";
                 status.ForeColor = Color.FromArgb(199, 243, 107);
                 installButton.Text = "LAUNCH";
                 installButton.Enabled = true;

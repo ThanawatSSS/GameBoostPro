@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -18,8 +19,8 @@ using Microsoft.Win32;
 [assembly: System.Reflection.AssemblyDescription("Smart game detection and reversible Windows gaming optimization")]
 [assembly: System.Reflection.AssemblyProduct("Game Boost Pro")]
 [assembly: System.Reflection.AssemblyCompany("Local PC Tools")]
-[assembly: System.Reflection.AssemblyVersion("3.1.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("3.1.0.0")]
+[assembly: System.Reflection.AssemblyVersion("3.1.1.0")]
+[assembly: System.Reflection.AssemblyFileVersion("3.1.1.0")]
 
 namespace GameBoostPro
 {
@@ -354,10 +355,16 @@ namespace GameBoostPro
         private static readonly JavaScriptSerializer Json = new JavaScriptSerializer();
         private static volatile bool catalogLoaded;
         private static DateTime lastDeepScanUtc = DateTime.MinValue;
-        private static int cachedDeepProcessId;
-        private static string cachedDeepDisplayName = "";
-        private static string cachedDeepExePath = "";
-        private static string cachedDeepSource = "";
+        private static readonly object RunningGameCacheLock = new object();
+        private static int cachedGameProcessId;
+        private static string cachedGameProcessName = "";
+        private static string cachedGameDisplayName = "";
+        private static string cachedGameExePath = "";
+        private static string cachedGameSource = "";
+        private static readonly object ProcessAccessLock = new object();
+        private static readonly Dictionary<int, Tuple<string, DateTime>> InaccessibleProcessUntilUtc =
+            new Dictionary<int, Tuple<string, DateTime>>();
+        private static readonly TimeSpan ProcessAccessRetryDelay = TimeSpan.FromSeconds(30);
 
         public static int InstalledCount
         {
@@ -403,6 +410,9 @@ namespace GameBoostPro
         public static DetectedGame FindRunningGame(string manualPath)
         {
             EnsureCatalog();
+            DetectedGame cached = TryGetCachedRunningGame(manualPath);
+            if (cached != null) return cached;
+
             Process[] processes = Process.GetProcesses();
             DetectedGame result = null;
             try
@@ -440,21 +450,6 @@ namespace GameBoostPro
                     catch { }
                 }
 
-                if (result == null && cachedDeepProcessId > 0)
-                {
-                    foreach (Process process in processes)
-                    {
-                        if (process.Id != cachedDeepProcessId) continue;
-                        string currentPath = TryGetProcessPath(process);
-                        if (String.Equals(currentPath, cachedDeepExePath, StringComparison.OrdinalIgnoreCase))
-                            result = CreateDetectedGame(cachedDeepDisplayName, cachedDeepExePath, cachedDeepSource, process);
-                        else
-                            ClearDeepCache();
-                        break;
-                    }
-                    if (result == null) ClearDeepCache();
-                }
-
                 if (result == null && DateTime.UtcNow - lastDeepScanUtc >= TimeSpan.FromSeconds(8))
                 {
                     lastDeepScanUtc = DateTime.UtcNow;
@@ -473,10 +468,6 @@ namespace GameBoostPro
                             {
                                 if (!IsUnderDirectory(exePath, install.DirectoryPath)) continue;
                                 result = CreateDetectedGame(install.DisplayName, exePath, install.Source, process);
-                                cachedDeepProcessId = process.Id;
-                                cachedDeepDisplayName = install.DisplayName;
-                                cachedDeepExePath = exePath;
-                                cachedDeepSource = install.Source;
                                 break;
                             }
                             if (result != null) break;
@@ -490,6 +481,7 @@ namespace GameBoostPro
                 foreach (Process process in processes)
                     if (result == null || result.Process == null || process.Id != result.Process.Id) process.Dispose();
             }
+            if (result != null) CacheRunningGame(result);
             return result;
         }
 
@@ -498,12 +490,80 @@ namespace GameBoostPro
             return new DetectedGame { DisplayName = name, ExePath = path, Source = source, Process = process };
         }
 
-        private static void ClearDeepCache()
+        private static DetectedGame TryGetCachedRunningGame(string manualPath)
         {
-            cachedDeepProcessId = 0;
-            cachedDeepDisplayName = "";
-            cachedDeepExePath = "";
-            cachedDeepSource = "";
+            int processId;
+            string processName;
+            string displayName;
+            string exePath;
+            string source;
+            lock (RunningGameCacheLock)
+            {
+                processId = cachedGameProcessId;
+                processName = cachedGameProcessName;
+                displayName = cachedGameDisplayName;
+                exePath = cachedGameExePath;
+                source = cachedGameSource;
+            }
+
+            if (processId <= 0) return null;
+            if (String.Equals(source, "MANUAL", StringComparison.OrdinalIgnoreCase) &&
+                !String.Equals(exePath, manualPath, StringComparison.OrdinalIgnoreCase))
+            {
+                ClearRunningGameCache(processId);
+                return null;
+            }
+
+            Process process = null;
+            try
+            {
+                process = Process.GetProcessById(processId);
+                if (process.HasExited || !String.Equals(process.ProcessName, processName, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException();
+                if (!String.IsNullOrWhiteSpace(exePath))
+                {
+                    string currentPath = TryGetProcessPath(process);
+                    if (!String.Equals(currentPath, exePath, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException();
+                }
+                return CreateDetectedGame(displayName, exePath, source, process);
+            }
+            catch
+            {
+                if (process != null) process.Dispose();
+                ClearRunningGameCache(processId);
+                return null;
+            }
+        }
+
+        private static void CacheRunningGame(DetectedGame game)
+        {
+            if (game == null || game.Process == null) return;
+            try
+            {
+                lock (RunningGameCacheLock)
+                {
+                    cachedGameProcessId = game.Process.Id;
+                    cachedGameProcessName = game.Process.ProcessName;
+                    cachedGameDisplayName = game.DisplayName ?? "";
+                    cachedGameExePath = game.ExePath ?? "";
+                    cachedGameSource = game.Source ?? "";
+                }
+            }
+            catch { ClearRunningGameCache(0); }
+        }
+
+        private static void ClearRunningGameCache(int expectedProcessId)
+        {
+            lock (RunningGameCacheLock)
+            {
+                if (expectedProcessId > 0 && cachedGameProcessId != expectedProcessId) return;
+                cachedGameProcessId = 0;
+                cachedGameProcessName = "";
+                cachedGameDisplayName = "";
+                cachedGameExePath = "";
+                cachedGameSource = "";
+            }
         }
 
         private static void EnsureCatalog()
@@ -514,7 +574,53 @@ namespace GameBoostPro
 
         private static string TryGetProcessPath(Process process)
         {
-            try { return process.MainModule.FileName; }
+            int processId;
+            string processName;
+            try
+            {
+                processId = process.Id;
+                processName = process.ProcessName;
+            }
+            catch { return ""; }
+
+            DateTime now = DateTime.UtcNow;
+            lock (ProcessAccessLock)
+            {
+                Tuple<string, DateTime> retry;
+                if (InaccessibleProcessUntilUtc.TryGetValue(processId, out retry))
+                {
+                    if (String.Equals(retry.Item1, processName, StringComparison.OrdinalIgnoreCase) &&
+                        retry.Item2 > now) return "";
+                    InaccessibleProcessUntilUtc.Remove(processId);
+                }
+            }
+
+            try
+            {
+                string path = process.MainModule.FileName;
+                lock (ProcessAccessLock) InaccessibleProcessUntilUtc.Remove(processId);
+                return path;
+            }
+            catch (Win32Exception ex)
+            {
+                if (ex.NativeErrorCode == 5)
+                {
+                    lock (ProcessAccessLock)
+                    {
+                        if (InaccessibleProcessUntilUtc.Count >= 256)
+                        {
+                            List<int> expired = new List<int>();
+                            foreach (KeyValuePair<int, Tuple<string, DateTime>> item in InaccessibleProcessUntilUtc)
+                                if (item.Value.Item2 <= now) expired.Add(item.Key);
+                            foreach (int id in expired) InaccessibleProcessUntilUtc.Remove(id);
+                            if (InaccessibleProcessUntilUtc.Count >= 256) InaccessibleProcessUntilUtc.Clear();
+                        }
+                        InaccessibleProcessUntilUtc[processId] =
+                            Tuple.Create(processName, now.Add(ProcessAccessRetryDelay));
+                    }
+                }
+                return "";
+            }
             catch { return ""; }
         }
 
@@ -670,12 +776,27 @@ namespace GameBoostPro
 
     internal static class Storage
     {
-        public static readonly string AppDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CodexGameBoost");
+        public static readonly string AppDir = ResolveAppDirectory();
         public static readonly string ConfigPath = Path.Combine(AppDir, "config-pro.json");
         public static readonly string StatePath = Path.Combine(AppDir, "state-pro.json");
         public static readonly string LegacyStatePath = Path.Combine(AppDir, "state.json");
-        private static readonly JavaScriptSerializer Json = new JavaScriptSerializer();
+        private static readonly JavaScriptSerializer ConfigJson = new JavaScriptSerializer();
+        private static readonly JavaScriptSerializer StateJson = new JavaScriptSerializer();
+        private static readonly object StateLock = new object();
+        private static bool statePresenceLoaded;
+        private static bool currentStateExists;
+        private static bool legacyStateExists;
+        private static bool stateContentLoaded;
+        private static BoostState cachedState;
+
+        private static string ResolveAppDirectory()
+        {
+            string testDirectory = AppDomain.CurrentDomain.GetData("GameBoostPro.TestAppDirectory") as string;
+            if (!String.IsNullOrWhiteSpace(testDirectory) && Path.IsPathRooted(testDirectory))
+                return Path.GetFullPath(testDirectory);
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CodexGameBoost");
+        }
 
         public static AppConfig LoadConfig()
         {
@@ -684,8 +805,8 @@ namespace GameBoostPro
                 if (File.Exists(ConfigPath))
                 {
                     string raw = File.ReadAllText(ConfigPath);
-                    AppConfig config = Json.Deserialize<AppConfig>(raw);
-                    Dictionary<string, object> fields = Json.Deserialize<Dictionary<string, object>>(raw);
+                    AppConfig config = ConfigJson.Deserialize<AppConfig>(raw);
+                    Dictionary<string, object> fields = ConfigJson.Deserialize<Dictionary<string, object>>(raw);
                     if (!fields.ContainsKey("Version") || config.Version < 4)
                     {
                         config.Version = 4;
@@ -703,24 +824,124 @@ namespace GameBoostPro
         public static void SaveConfig(AppConfig config)
         {
             Directory.CreateDirectory(AppDir);
-            WriteAtomic(ConfigPath, Json.Serialize(config));
+            WriteAtomic(ConfigPath, ConfigJson.Serialize(config));
         }
 
         public static BoostState LoadState()
         {
-            if (!File.Exists(StatePath)) return null;
-            return Json.Deserialize<BoostState>(File.ReadAllText(StatePath));
+            lock (StateLock)
+            {
+                EnsureStatePresence();
+                if (!currentStateExists) return null;
+                if (!stateContentLoaded)
+                {
+                    cachedState = StateJson.Deserialize<BoostState>(File.ReadAllText(StatePath));
+                    stateContentLoaded = true;
+                }
+                return cachedState;
+            }
+        }
+
+        public static BoostState LoadStateForRestore()
+        {
+            lock (StateLock)
+            {
+                if (!File.Exists(StatePath))
+                {
+                    currentStateExists = false;
+                    statePresenceLoaded = true;
+                    stateContentLoaded = true;
+                    cachedState = null;
+                    return null;
+                }
+
+                BoostState state = StateJson.Deserialize<BoostState>(File.ReadAllText(StatePath));
+                currentStateExists = true;
+                statePresenceLoaded = true;
+                stateContentLoaded = true;
+                cachedState = state;
+                return state;
+            }
         }
 
         public static void SaveState(BoostState state)
         {
-            Directory.CreateDirectory(AppDir);
-            WriteAtomic(StatePath, Json.Serialize(state));
+            lock (StateLock)
+            {
+                try
+                {
+                    Directory.CreateDirectory(AppDir);
+                    WriteAtomic(StatePath, StateJson.Serialize(state));
+                    cachedState = state;
+                    stateContentLoaded = true;
+                    currentStateExists = true;
+                    statePresenceLoaded = true;
+                }
+                catch
+                {
+                    cachedState = null;
+                    stateContentLoaded = false;
+                    statePresenceLoaded = false;
+                    throw;
+                }
+            }
         }
 
         public static bool HasState()
         {
-            return File.Exists(StatePath) || File.Exists(LegacyStatePath);
+            lock (StateLock)
+            {
+                EnsureStatePresence();
+                return currentStateExists || legacyStateExists;
+            }
+        }
+
+        public static bool HasCurrentState()
+        {
+            lock (StateLock)
+            {
+                EnsureStatePresence();
+                return currentStateExists;
+            }
+        }
+
+        public static bool HasLegacyState()
+        {
+            lock (StateLock)
+            {
+                EnsureStatePresence();
+                return legacyStateExists;
+            }
+        }
+
+        public static void DeleteState()
+        {
+            lock (StateLock)
+            {
+                if (File.Exists(StatePath)) File.Delete(StatePath);
+                cachedState = null;
+                stateContentLoaded = true;
+                currentStateExists = false;
+                statePresenceLoaded = true;
+            }
+        }
+
+        public static void DeleteLegacyState()
+        {
+            lock (StateLock)
+            {
+                if (File.Exists(LegacyStatePath)) File.Delete(LegacyStatePath);
+                legacyStateExists = false;
+                statePresenceLoaded = true;
+            }
+        }
+
+        private static void EnsureStatePresence()
+        {
+            if (statePresenceLoaded) return;
+            currentStateExists = File.Exists(StatePath);
+            legacyStateExists = File.Exists(LegacyStatePath);
+            statePresenceLoaded = true;
         }
 
         private static void WriteAtomic(string path, string content)
@@ -850,9 +1071,9 @@ namespace GameBoostPro
 
         public static void Disable()
         {
-            if (File.Exists(Storage.StatePath))
+            if (Storage.HasCurrentState())
             {
-                BoostState state = Storage.LoadState();
+                BoostState state = Storage.LoadStateForRestore();
                 if (state == null) throw new InvalidOperationException("ข้อมูลคืนค่าเสียหาย กรุณาอย่าลบไฟล์สถานะ");
 
                 if (state.GameProcessId > 0 && state.ProcessTuningApplied)
@@ -876,11 +1097,11 @@ namespace GameBoostPro
 
                 RunPowerCfg("/S " + state.PreviousPowerGuid);
                 foreach (RegistrySnapshot item in state.Registry) Restore(item);
-                File.Delete(Storage.StatePath);
+                Storage.DeleteState();
                 return;
             }
 
-            if (File.Exists(Storage.LegacyStatePath))
+            if (Storage.HasLegacyState())
             {
                 RestoreLegacyState();
                 return;
@@ -891,12 +1112,18 @@ namespace GameBoostPro
 
         public static bool ApplyGamePriority(BoostState state)
         {
+            return ApplyGamePriority(state, state == null ? 0 : state.GameProcessId);
+        }
+
+        public static bool ApplyGamePriority(BoostState state, int detectedProcessId)
+        {
             if (state == null) return false;
             if (!state.UseAboveNormalPriority && !state.UseHighQos && !state.UseDynamicPriorityBoost) return true;
             Process game = null;
-            if (state.GameProcessId > 0)
+            int targetProcessId = detectedProcessId > 0 ? detectedProcessId : state.GameProcessId;
+            if (targetProcessId > 0)
             {
-                try { game = Process.GetProcessById(state.GameProcessId); }
+                try { game = Process.GetProcessById(targetProcessId); }
                 catch { game = null; }
             }
             if (game == null) game = FindGameProcess(state.GamePath);
@@ -906,20 +1133,15 @@ namespace GameBoostPro
             {
                 if (!state.ProcessTuningApplied || state.GameProcessId != game.Id)
                 {
-                    state.GameProcessId = game.Id;
-                    state.PreviousPriority = game.PriorityClass.ToString();
-                    bool boostDisabled;
-                    if (GetProcessPriorityBoost(game.Handle, out boostDisabled))
-                        state.PreviousPriorityBoostDisabled = boostDisabled;
+                    int gameProcessId = game.Id;
+                    string previousPriority = game.PriorityClass.ToString();
+                    bool previousPriorityBoostDisabled = false;
+                    GetProcessPriorityBoost(game.Handle, out previousPriorityBoostDisabled);
 
                     POWER_THROTTLING_STATE previous = new POWER_THROTTLING_STATE();
                     previous.Version = 1;
-                    if (GetProcessInformation(game.Handle, ProcessPowerThrottling, ref previous, Marshal.SizeOf(previous)))
-                    {
-                        state.HadPowerThrottleState = true;
-                        state.PreviousThrottleControl = previous.ControlMask;
-                        state.PreviousThrottleState = previous.StateMask;
-                    }
+                    bool hadPowerThrottleState = GetProcessInformation(game.Handle, ProcessPowerThrottling,
+                        ref previous, Marshal.SizeOf(previous));
 
                     if (state.UseAboveNormalPriority)
                         game.PriorityClass = ProcessPriorityClass.AboveNormal;
@@ -933,6 +1155,13 @@ namespace GameBoostPro
                         highQos.StateMask = 0;
                         SetProcessInformation(game.Handle, ProcessPowerThrottling, ref highQos, Marshal.SizeOf(highQos));
                     }
+
+                    state.GameProcessId = gameProcessId;
+                    state.PreviousPriority = previousPriority;
+                    state.PreviousPriorityBoostDisabled = previousPriorityBoostDisabled;
+                    state.HadPowerThrottleState = hadPowerThrottleState;
+                    state.PreviousThrottleControl = hadPowerThrottleState ? previous.ControlMask : 0;
+                    state.PreviousThrottleState = hadPowerThrottleState ? previous.StateMask : 0;
                     state.ProcessTuningApplied = true;
                     Storage.SaveState(state);
                 }
@@ -946,6 +1175,7 @@ namespace GameBoostPro
         {
             if (state == null || String.IsNullOrWhiteSpace(gamePath)) return;
             if (String.Equals(state.GamePath, gamePath, StringComparison.OrdinalIgnoreCase)) return;
+            string previousGamePath = state.GamePath;
             if (!state.PreferHighPerformanceGpu)
             {
                 state.GamePath = gamePath;
@@ -963,13 +1193,31 @@ namespace GameBoostPro
                     break;
                 }
             }
+            RegistrySnapshot addedSnapshot = null;
             if (!captured)
-                state.Registry.Add(Capture(@"Software\Microsoft\DirectX\UserGpuPreferences", gamePath));
+            {
+                addedSnapshot = Capture(@"Software\Microsoft\DirectX\UserGpuPreferences", gamePath);
+                state.Registry.Add(addedSnapshot);
+            }
 
             state.GamePath = gamePath;
-            SetRegistry(@"Software\Microsoft\DirectX\UserGpuPreferences", gamePath,
-                "GpuPreference=2;", RegistryValueKind.String);
-            Storage.SaveState(state);
+            try
+            {
+                Storage.SaveState(state);
+                SetRegistry(@"Software\Microsoft\DirectX\UserGpuPreferences", gamePath,
+                    "GpuPreference=2;", RegistryValueKind.String);
+            }
+            catch
+            {
+                try
+                {
+                    if (addedSnapshot != null) state.Registry.Remove(addedSnapshot);
+                    state.GamePath = previousGamePath;
+                    Storage.SaveState(state);
+                }
+                catch { }
+                throw;
+            }
         }
 
         private static List<Tuple<string, string, object, RegistryValueKind>> GetEnabledTweaks(AppConfig options)
@@ -1128,7 +1376,7 @@ namespace GameBoostPro
                     }
                 }
             }
-            File.Delete(Storage.LegacyStatePath);
+            Storage.DeleteLegacyState();
         }
     }
 
@@ -1139,6 +1387,18 @@ namespace GameBoostPro
         private bool hover;
         private int phase;
         private readonly Timer animation;
+        private readonly Pen thinRingPen;
+        private readonly Pen thickRingPen;
+        private readonly Pen borderPen;
+        private readonly Pen focusPen;
+        private readonly SolidBrush shadowBrush;
+        private readonly SolidBrush coreBrush;
+        private readonly SolidBrush eyebrowBrush;
+        private readonly SolidBrush actionBrush;
+        private readonly SolidBrush hintBrush;
+        private readonly Font eyebrowFont;
+        private readonly Font actionFont;
+        private readonly Font hintFont;
 
         public event EventHandler BoostClick;
 
@@ -1165,6 +1425,18 @@ namespace GameBoostPro
             TabStop = true;
             Cursor = Cursors.Hand;
             DoubleBuffered = true;
+            thinRingPen = CreateRingPen(5f);
+            thickRingPen = CreateRingPen(8f);
+            borderPen = new Pen(Palette.Lime, 2f);
+            focusPen = new Pen(Palette.Amber, 1f) { DashStyle = DashStyle.Dot };
+            shadowBrush = new SolidBrush(Color.FromArgb(70, Color.Black));
+            coreBrush = new SolidBrush(Palette.Surface);
+            eyebrowBrush = new SolidBrush(Palette.Muted);
+            actionBrush = new SolidBrush(Palette.Lime);
+            hintBrush = new SolidBrush(Palette.Text);
+            eyebrowFont = new Font("Segoe UI", 9, FontStyle.Bold);
+            actionFont = new Font("Segoe UI Semibold", 25, FontStyle.Bold);
+            hintFont = new Font("Segoe UI", 9);
             animation = new Timer();
             animation.Interval = 55;
             animation.Tick += delegate { phase = (phase + 1) % 24; Invalidate(); };
@@ -1190,7 +1462,22 @@ namespace GameBoostPro
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) animation.Dispose();
+            if (disposing)
+            {
+                animation.Dispose();
+                thinRingPen.Dispose();
+                thickRingPen.Dispose();
+                borderPen.Dispose();
+                focusPen.Dispose();
+                shadowBrush.Dispose();
+                coreBrush.Dispose();
+                eyebrowBrush.Dispose();
+                actionBrush.Dispose();
+                hintBrush.Dispose();
+                eyebrowFont.Dispose();
+                actionFont.Dispose();
+                hintFont.Dispose();
+            }
             base.Dispose(disposing);
         }
 
@@ -1206,47 +1493,39 @@ namespace GameBoostPro
                 int distance = (i - phase + 24) % 24;
                 Color color = busy && distance < 6 ? Palette.Amber :
                     Color.FromArgb(active || hover ? 235 : 135, accent);
-                using (Pen pen = new Pen(color, i % 3 == 0 ? 8f : 5f))
-                {
-                    pen.StartCap = LineCap.Round;
-                    pen.EndCap = LineCap.Round;
-                    g.DrawArc(pen, ring, -90 + i * 15 + 2, 10);
-                }
+                Pen pen = i % 3 == 0 ? thickRingPen : thinRingPen;
+                pen.Color = color;
+                g.DrawArc(pen, ring, -90 + i * 15 + 2, 10);
             }
 
             RectangleF core = new RectangleF(57, 57, Width - 114, Height - 114);
-            using (SolidBrush shadow = new SolidBrush(Color.FromArgb(70, Color.Black)))
-                g.FillEllipse(shadow, new RectangleF(core.X + 4, core.Y + 8, core.Width, core.Height));
-            using (SolidBrush fill = new SolidBrush(hover ? Palette.SurfaceHigh : Palette.Surface))
-                g.FillEllipse(fill, core);
-            using (Pen border = new Pen(Color.FromArgb(95, accent), 2f))
-                g.DrawEllipse(border, core);
+            g.FillEllipse(shadowBrush, new RectangleF(core.X + 4, core.Y + 8, core.Width, core.Height));
+            coreBrush.Color = hover ? Palette.SurfaceHigh : Palette.Surface;
+            g.FillEllipse(coreBrush, core);
+            borderPen.Color = Color.FromArgb(95, accent);
+            g.DrawEllipse(borderPen, core);
 
             string eyebrow = busy ? "กำลังปรับระบบ" : (active ? "GAME MODE  ON" : "STANDBY");
             string action = active ? "RESTORE" : "BOOST";
             string hint = active ? "กลับสู่โหมดปกติ" : "กดเพื่อเร่งเครื่อง";
-            DrawCentered(g, eyebrow, new Font("Segoe UI", 9, FontStyle.Bold), Palette.Muted, 119);
-            DrawCentered(g, action, new Font("Segoe UI Semibold", 25, FontStyle.Bold), accent, 145);
-            DrawCentered(g, hint, new Font("Segoe UI", 9), Palette.Text, 187);
+            actionBrush.Color = accent;
+            DrawCentered(g, eyebrow, eyebrowFont, eyebrowBrush, 119);
+            DrawCentered(g, action, actionFont, actionBrush, 145);
+            DrawCentered(g, hint, hintFont, hintBrush, 187);
 
             if (Focused)
-            {
-                using (Pen focus = new Pen(Palette.Amber, 1f))
-                {
-                    focus.DashStyle = DashStyle.Dot;
-                    g.DrawEllipse(focus, new RectangleF(core.X - 6, core.Y - 6, core.Width + 12, core.Height + 12));
-                }
-            }
+                g.DrawEllipse(focusPen, new RectangleF(core.X - 6, core.Y - 6, core.Width + 12, core.Height + 12));
         }
 
-        private static void DrawCentered(Graphics g, string text, Font font, Color color, float y)
+        private static Pen CreateRingPen(float width)
         {
-            using (font)
-            using (SolidBrush brush = new SolidBrush(color))
-            {
-                SizeF size = g.MeasureString(text, font);
-                g.DrawString(text, font, brush, (320 - size.Width) / 2f, y);
-            }
+            return new Pen(Palette.Lime, width) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+        }
+
+        private void DrawCentered(Graphics g, string text, Font font, Brush brush, float y)
+        {
+            SizeF size = g.MeasureString(text, font);
+            g.DrawString(text, font, brush, (ClientSize.Width - size.Width) / 2f, y);
         }
     }
 
@@ -1293,6 +1572,12 @@ namespace GameBoostPro
     internal sealed class MetricBar : Control
     {
         private float value;
+        private readonly Font labelFont;
+        private readonly Font numberFont;
+        private readonly SolidBrush mutedBrush;
+        private readonly SolidBrush textBrush;
+        private readonly SolidBrush trackBrush;
+        private readonly SolidBrush fillBrush;
         public string Caption { get; set; }
         public float Value
         {
@@ -1311,23 +1596,37 @@ namespace GameBoostPro
             Size = new Size(180, 48);
             Caption = "";
             DoubleBuffered = true;
+            labelFont = new Font("Segoe UI", 8);
+            numberFont = new Font("Segoe UI Semibold", 10, FontStyle.Bold);
+            mutedBrush = new SolidBrush(Palette.Muted);
+            textBrush = new SolidBrush(Palette.Text);
+            trackBrush = new SolidBrush(Palette.Line);
+            fillBrush = new SolidBrush(Palette.Lime);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                labelFont.Dispose();
+                numberFont.Dispose();
+                mutedBrush.Dispose();
+                textBrush.Dispose();
+                trackBrush.Dispose();
+                fillBrush.Dispose();
+            }
+            base.Dispose(disposing);
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            using (Font label = new Font("Segoe UI", 8))
-            using (Font number = new Font("Segoe UI Semibold", 10, FontStyle.Bold))
-            using (SolidBrush muted = new SolidBrush(Palette.Muted))
-            using (SolidBrush text = new SolidBrush(Palette.Text))
-            {
-                e.Graphics.DrawString(Caption, label, muted, 0, 1);
-                string numberText = Math.Round(value).ToString(CultureInfo.InvariantCulture) + "%";
-                SizeF size = e.Graphics.MeasureString(numberText, number);
-                e.Graphics.DrawString(numberText, number, text, Width - size.Width, 0);
-            }
-            using (SolidBrush track = new SolidBrush(Palette.Line)) e.Graphics.FillRectangle(track, 0, 30, Width, 4);
-            using (SolidBrush fill = new SolidBrush(value > 85 ? Palette.Coral : Palette.Lime))
-                e.Graphics.FillRectangle(fill, 0, 30, (int)(Width * value / 100f), 4);
+            e.Graphics.DrawString(Caption, labelFont, mutedBrush, 0, 1);
+            string numberText = Math.Round(value).ToString(CultureInfo.InvariantCulture) + "%";
+            SizeF size = e.Graphics.MeasureString(numberText, numberFont);
+            e.Graphics.DrawString(numberText, numberFont, textBrush, Width - size.Width, 0);
+            e.Graphics.FillRectangle(trackBrush, 0, 30, Width, 4);
+            fillBrush.Color = value > 85 ? Palette.Coral : Palette.Lime;
+            e.Graphics.FillRectangle(fillBrush, 0, 30, (int)(Width * value / 100f), 4);
         }
     }
 
@@ -1639,7 +1938,7 @@ namespace GameBoostPro
             capture = AddSetting("Disable background capture", "หยุด Game DVR และการอัดหน้าจอเบื้องหลัง", y += 52, source.DisableBackgroundCapture);
             gpu = AddSetting("High-performance GPU", "กำหนด GPU ประสิทธิภาพสูงให้ไฟล์เกม", y += 52, source.PreferHighPerformanceGpu);
             priority = AddSetting("AboveNormal priority", "เพิ่มลำดับ CPU โดยไม่ใช้ High หรือ Realtime", y += 52, source.UseAboveNormalPriority);
-            highQos = AddSetting("HighQoS", "ปิด Power Throttling เฉพาะโปรเซสเกม", y += 52, source.UseHighQos);
+            highQos = AddSetting("Disable power throttling", "กัน Windows ลดความเร็วเฉพาะโปรเซสเกม", y += 52, source.UseHighQos);
             priorityBoost = AddSetting("Dynamic priority boost", "เปิดกลไกตอบสนองระยะสั้นของ Windows", y += 52, source.UseDynamicPriorityBoost);
 
             Button reset = CreateButton("RESET BEST", 26, 480, 122, Palette.SurfaceHigh, Palette.Text);
@@ -1744,6 +2043,7 @@ namespace GameBoostPro
 
     internal sealed class MonitorSnapshot
     {
+        public bool HasMetrics { get; set; }
         public float Cpu { get; set; }
         public float Memory { get; set; }
         public float Gpu { get; set; }
@@ -1761,6 +2061,8 @@ namespace GameBoostPro
 
     internal sealed class MainForm : Form
     {
+        private const int DiscoveryMonitorIntervalMs = 1500;
+        private const int ActiveMonitorIntervalMs = 3000;
         private readonly AppConfig config;
         private readonly PlatformProfile platform;
         private readonly BoostDial dial;
@@ -1907,7 +2209,7 @@ namespace GameBoostPro
             gpuReader = new GpuUsageReader();
 
             monitor = new Timer();
-            monitor.Interval = 1500;
+            monitor.Interval = DiscoveryMonitorIntervalMs;
             monitor.Tick += MonitorTick;
             monitor.Start();
 
@@ -2137,7 +2439,8 @@ namespace GameBoostPro
         private void MonitorTick(object sender, EventArgs e)
         {
             if (System.Threading.Interlocked.Exchange(ref monitorInFlight, 1) != 0) return;
-            Task.Factory.StartNew<MonitorSnapshot>(new Func<MonitorSnapshot>(BuildMonitorSnapshot)).ContinueWith(delegate(Task<MonitorSnapshot> task)
+            bool collectMetrics = Visible && WindowState != FormWindowState.Minimized;
+            Task.Factory.StartNew<MonitorSnapshot>(delegate { return BuildMonitorSnapshot(collectMetrics); }).ContinueWith(delegate(Task<MonitorSnapshot> task)
             {
                 try
                 {
@@ -2156,35 +2459,63 @@ namespace GameBoostPro
             });
         }
 
-        private MonitorSnapshot BuildMonitorSnapshot()
+        private MonitorSnapshot BuildMonitorSnapshot(bool collectMetrics)
+        {
+            System.Threading.Thread worker = System.Threading.Thread.CurrentThread;
+            System.Threading.ThreadPriority previousPriority = worker.Priority;
+            bool priorityLowered = false;
+            try
+            {
+                if (previousPriority > System.Threading.ThreadPriority.BelowNormal)
+                {
+                    worker.Priority = System.Threading.ThreadPriority.BelowNormal;
+                    priorityLowered = true;
+                }
+            }
+            catch { }
+
+            try { return CollectMonitorSnapshot(collectMetrics); }
+            finally
+            {
+                if (priorityLowered)
+                {
+                    try { worker.Priority = previousPriority; }
+                    catch { }
+                }
+            }
+        }
+
+        private MonitorSnapshot CollectMonitorSnapshot(bool collectMetrics)
         {
             MonitorSnapshot snapshot = new MonitorSnapshot();
-            try { snapshot.Cpu = cpuCounter.NextValue(); } catch { }
-            try { snapshot.Gpu = gpuReader.NextValue(); } catch { }
-            MEMORYSTATUSEX memory = new MEMORYSTATUSEX();
-            if (GlobalMemoryStatusEx(memory)) snapshot.Memory = memory.dwMemoryLoad;
+            if (collectMetrics)
+            {
+                snapshot.HasMetrics = true;
+                try { snapshot.Cpu = cpuCounter.NextValue(); } catch { }
+                try { snapshot.Gpu = gpuReader.NextValue(); } catch { }
+                MEMORYSTATUSEX memory = new MEMORYSTATUSEX();
+                if (GlobalMemoryStatusEx(memory)) snapshot.Memory = memory.dwMemoryLoad;
+            }
             if (working) return snapshot;
 
             snapshot.Game = GameDetector.FindRunningGame(config.GamePath);
-            try { snapshot.State = Storage.LoadState(); } catch { }
-
-            if (snapshot.Game != null && snapshot.State != null && !working)
+            lock (systemLock)
             {
-                lock (systemLock)
+                if (working) return snapshot;
+                try { snapshot.State = Storage.LoadState(); }
+                catch { return snapshot; }
+
+                if (snapshot.Game != null && snapshot.State != null)
                 {
                     try
                     {
-                        BoostState latest = Storage.LoadState();
+                        BoostState latest = snapshot.State;
                         if (latest != null)
                         {
                             if (!String.IsNullOrWhiteSpace(snapshot.Game.ExePath))
                                 SystemTuner.AttachGamePath(latest, snapshot.Game.ExePath);
                             if (!latest.ProcessTuningApplied || latest.GameProcessId != snapshot.Game.Process.Id)
-                            {
-                                latest.GameProcessId = snapshot.Game.Process.Id;
-                                Storage.SaveState(latest);
-                            }
-                            SystemTuner.ApplyGamePriority(latest);
+                                SystemTuner.ApplyGamePriority(latest, snapshot.Game.Process.Id);
                             snapshot.State = latest;
                         }
                     }
@@ -2196,9 +2527,12 @@ namespace GameBoostPro
 
         private void ApplyMonitorSnapshot(MonitorSnapshot snapshot)
         {
-            cpuBar.Value = snapshot.Cpu;
-            ramBar.Value = snapshot.Memory;
-            gpuBar.Value = snapshot.Gpu;
+            if (snapshot.HasMetrics)
+            {
+                cpuBar.Value = snapshot.Cpu;
+                ramBar.Value = snapshot.Memory;
+                gpuBar.Value = snapshot.Gpu;
+            }
             if (working) return;
 
             if (detectedGame != null && detectedGame.Process != null &&
@@ -2207,6 +2541,9 @@ namespace GameBoostPro
             detectedGame = snapshot.Game;
             bool running = detectedGame != null;
             BoostState state = snapshot.State;
+            int desiredInterval = running && state != null
+                ? ActiveMonitorIntervalMs : DiscoveryMonitorIntervalMs;
+            if (monitor.Interval != desiredInterval) monitor.Interval = desiredInterval;
 
             if (running)
             {

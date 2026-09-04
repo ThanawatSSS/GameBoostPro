@@ -1,5 +1,5 @@
-Game Boost Pro 3.1
-==================
+Game Boost Pro 3.1.1
+====================
 
 SUPPORTED PLATFORMS
 - Acer laptop with NitroSense installed
@@ -20,7 +20,8 @@ WHAT BEST MODE DOES
 - Disables Game DVR and background capture during the session
 - Requests the high-performance GPU for the detected game
 - Sets only the game process to AboveNormal priority
-- Applies HighQoS and keeps Windows Dynamic Priority Boost enabled
+- Disables Windows power throttling for the game process and keeps Dynamic
+  Priority Boost enabled
 - Restores the original power plan and registry values when the session ends
 
 ACER + NITROSENSE MODE
@@ -44,7 +45,7 @@ GAME LIBRARY
 ADVANCED MODE
 - The ADVANCED BEST button is always visible in the main window
 - Six controls independently manage Game Mode, capture, GPU preference,
-  AboveNormal priority, HighQoS and Dynamic Priority Boost
+  AboveNormal priority, process power throttling and Dynamic Priority Boost
 - RESET BEST enables all six controls; Ultimate Performance remains mandatory
 
 ADMIN PERMISSION
@@ -68,4 +69,14 @@ Game Boost cannot create performance beyond the CPU, GPU, cooling and power limi
 of the computer. The target is steadier frame time and fewer avoidable background
 interruptions. Actual FPS improvement depends on the existing bottleneck.
 
-Game Boost Pro 3.1 is distributed under the MIT License.
+MONITORING OVERHEAD
+- Monitoring runs outside the UI thread at BelowNormal worker priority.
+- It checks every 1.5 seconds while waiting for a game, then every 3 seconds once
+  a running game and active Boost state are stable.
+- CPU, memory and GPU telemetry pauses while the app is hidden in the tray; game
+  detection and automatic restore remain active.
+- Recovery state is cached in memory during play, while RESTORE deliberately reads
+  the saved file again so crash recovery remains authoritative.
+- This release does not run continuous frame capture or inject an overlay into games.
+
+Game Boost Pro 3.1.1 is distributed under the MIT License.

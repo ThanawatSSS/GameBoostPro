@@ -11,12 +11,12 @@ function Assert-True([bool]$condition, [string]$message) {
 
 $appPath = (Resolve-Path (Join-Path $dist 'GameBoostPro.exe')).Path
 $setupPath = (Resolve-Path (Join-Path $dist 'GameBoostPro-Setup.exe')).Path
-$zipPath = (Resolve-Path (Join-Path $dist 'GameBoostPro-Portable-v3.1.0.zip')).Path
+$zipPath = (Resolve-Path (Join-Path $dist 'GameBoostPro-Portable-v3.1.1.zip')).Path
 $assembly = [Reflection.Assembly]::LoadFile($appPath)
 $flags = [Reflection.BindingFlags]'Static,Public,NonPublic'
 
-Assert-True ((Get-Item $appPath).VersionInfo.FileVersion -eq '3.1.0.0') 'app version'
-Assert-True ((Get-Item $setupPath).VersionInfo.FileVersion -eq '3.1.0.0') 'setup version'
+Assert-True ((Get-Item $appPath).VersionInfo.FileVersion -eq '3.1.1.0') 'app version'
+Assert-True ((Get-Item $setupPath).VersionInfo.FileVersion -eq '3.1.1.0') 'setup version'
 
 $platformDetector = $assembly.GetType('GameBoostPro.PlatformDetector')
 $evaluate = $platformDetector.GetMethod('Evaluate', $flags)
@@ -69,7 +69,19 @@ Assert-True ($source -notmatch 'HighPerformanceGuid') 'no High Performance fallb
 Assert-True ($source -match 'ADVANCED  BEST') 'visible Advanced Mode'
 Assert-True ($source -match 'Task\.Factory\.StartNew') 'monitoring runs outside the UI thread'
 Assert-True ($source -match 'private static volatile bool catalogLoaded') 'non-blocking catalog readiness'
+Assert-True ($source -match 'TryGetCachedRunningGame') 'stable running-game fast path'
 Assert-True ($source -match 'detectedGame\.Process\.Dispose\(\)') 'long-session process cleanup'
+Assert-True ($source -notmatch 'DrawCentered\(g, eyebrow, new Font') 'BoostDial reuses paint fonts'
+Assert-True ($source -notmatch 'using \(Pen pen = new Pen\(color') 'BoostDial reuses ring pens'
+Assert-True ($source -notmatch 'using \(Font label = new Font') 'MetricBar reuses paint fonts'
+Assert-True ($source -match 'ActiveMonitorIntervalMs = 3000') 'adaptive stable monitor interval'
+Assert-True ($source -match 'ThreadPriority\.BelowNormal') 'low-priority monitor worker'
+Assert-True ($source -match 'Visible && WindowState != FormWindowState\.Minimized') `
+    'telemetry pauses while hidden'
+Assert-True ($source -match 'LoadStateForRestore') 'fresh recovery state read'
+Assert-True ($source -match 'GameBoostPro\.TestAppDirectory') 'isolated performance-test storage'
+Assert-True ($source -match 'ApplyGamePriority\(latest, snapshot\.Game\.Process\.Id\)') `
+    'detected process ID is tuned directly'
 
 & (Join-Path $root 'tests\Test-Performance.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Performance tests failed' }

@@ -1,3 +1,30 @@
+# Game Boost Pro 3.1.1
+
+## Long-session performance patch
+
+- Reused Boost Dial and metric fonts, pens, and brushes instead of allocating GDI
+  wrappers on every paint.
+- Cached recovery state in memory during monitoring and retained a fresh disk read
+  for RESTORE, preserving crash-recovery authority.
+- Removed the duplicate state-file read from every active monitor pass and kept the
+  read/tune sequence under the existing system lock.
+- Added a short access-denied cache for protected process paths during deep scans.
+- Added a verified running-game PID fast path so stable sessions avoid enumerating
+  every process on each monitor pass.
+- Reduced stable in-game monitoring frequency from 1.5 to 3 seconds and runs monitor
+  collection at `BelowNormal` worker priority.
+- Paused CPU, memory, and GPU counter collection while the app is hidden in the
+  tray without pausing game detection or automatic restore.
+- Renamed the visible HighQoS control to Disable power throttling so the UI matches
+  the Windows process policy it actually applies.
+- Added a Boost Dial paint budget and stable monitor duty estimate to release tests.
+- Fixed process retuning when a detected game restarts with a new PID.
+
+Measured on the release test PC: Boost Dial paint p95 remains below 1 ms. The
+conservative p95 monitor-duty estimate is below 0.3% of one logical CPU core while
+the window is visible and approximately 0.1% in the tray. Results vary by machine
+and game library size.
+
 # Game Boost Pro 3.1.0
 
 ## Quality release
