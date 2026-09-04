@@ -11,19 +11,24 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Game Boost Pro Setup")]
 [assembly: AssemblyProduct("Game Boost Pro")]
 [assembly: AssemblyCompany("Game Boost Pro")]
-[assembly: AssemblyVersion("3.1.1.0")]
-[assembly: AssemblyFileVersion("3.1.1.0")]
+[assembly: AssemblyVersion("3.2.0.0")]
+[assembly: AssemblyFileVersion("3.2.0.0")]
 
 namespace GameBoostProSetup
 {
     internal static class Product
     {
         public const string Name = "Game Boost Pro";
-        public const string Version = "3.1.1";
+        public const string Version = "3.2.0";
         public const string FolderName = "Game Boost Pro";
         public const string AppFile = "GameBoostPro.exe";
         public const string ReadmeFile = "README.txt";
+        public const string ToolsFolder = "tools";
+        public const string PresentMonFile = "PresentMon.exe";
+        public const string PresentMonLicenseFile = "PresentMon-LICENSE.txt";
         public const string UninstallKey = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\GameBoostPro";
+        public const string StateKey = @"SOFTWARE\GameBoostPro";
+        public const string StateValue = "RecoveryState";
 
         public static string InstallDirectory
         {
@@ -35,6 +40,20 @@ namespace GameBoostProSetup
             Process[] processes = Process.GetProcessesByName("GameBoostPro");
             try { return processes.Length > 0; }
             finally { foreach (Process process in processes) process.Dispose(); }
+        }
+
+        public static bool HasPendingRecoveryState()
+        {
+            try
+            {
+                using (RegistryKey key = Registry.LocalMachine.OpenSubKey(StateKey, false))
+                    if (key != null && key.GetValue(StateValue, null) is string) return true;
+            }
+            catch { }
+            string legacyDirectory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CodexGameBoost");
+            return File.Exists(Path.Combine(legacyDirectory, "state-pro.json")) ||
+                File.Exists(Path.Combine(legacyDirectory, "state.json"));
         }
     }
 
@@ -58,7 +77,7 @@ namespace GameBoostProSetup
             if (icon != null) Icon = icon;
 
             Controls.Add(MakeLabel("GAME BOOST", 30, 25, 185, 34, 19, FontStyle.Bold, ForeColor));
-            Label badge = MakeLabel("SETUP 3.1", 220, 30, 76, 24, 8, FontStyle.Bold, BackColor);
+            Label badge = MakeLabel("SETUP 3.2", 220, 30, 76, 24, 8, FontStyle.Bold, BackColor);
             badge.BackColor = Color.FromArgb(199, 243, 107);
             badge.TextAlign = ContentAlignment.MiddleCenter;
             Controls.Add(badge);
@@ -129,11 +148,16 @@ namespace GameBoostProSetup
                 Directory.CreateDirectory(Product.InstallDirectory);
                 ExtractResource("GameBoostPro.Payload.exe", Path.Combine(Product.InstallDirectory, Product.AppFile));
                 ExtractResource("GameBoostPro.Readme.txt", Path.Combine(Product.InstallDirectory, Product.ReadmeFile));
+                string toolsDirectory = Path.Combine(Product.InstallDirectory, Product.ToolsFolder);
+                Directory.CreateDirectory(toolsDirectory);
+                ExtractResource("GameBoostPro.PresentMon.exe", Path.Combine(toolsDirectory, Product.PresentMonFile));
+                ExtractResource("GameBoostPro.PresentMonLicense.txt",
+                    Path.Combine(toolsDirectory, Product.PresentMonLicenseFile));
                 File.Copy(Application.ExecutablePath, Path.Combine(Product.InstallDirectory, "Uninstall.exe"), true);
                 CreateShortcuts();
                 RegisterUninstaller();
                 installed = true;
-                status.Text = "ติดตั้ง Game Boost Pro 3.1.1 เรียบร้อยแล้ว";
+                status.Text = "ติดตั้ง Game Boost Pro 3.2.0 เรียบร้อยแล้ว";
                 status.ForeColor = Color.FromArgb(199, 243, 107);
                 installButton.Text = "LAUNCH";
                 installButton.Enabled = true;
@@ -256,6 +280,12 @@ namespace GameBoostProSetup
             {
                 MessageBox.Show("กรุณาออกจาก Game Boost Pro ก่อนถอนการติดตั้ง", Product.Name,
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+            if (Product.HasPendingRecoveryState())
+            {
+                MessageBox.Show("ยังมี Game Mode ที่รอคืนค่า กรุณาเปิด Game Boost Pro แล้วกด RESTORE ก่อนถอนการติดตั้ง",
+                    Product.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
             string temporary = Path.Combine(Path.GetTempPath(), "GameBoostPro-Uninstall-" + Guid.NewGuid().ToString("N") + ".exe");

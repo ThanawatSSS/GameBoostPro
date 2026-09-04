@@ -1,4 +1,4 @@
-Game Boost Pro 3.1.1
+Game Boost Pro 3.2.0
 ====================
 
 SUPPORTED PLATFORMS
@@ -15,13 +15,17 @@ power profile from competing with an untested OEM control application.
 
 WHAT BEST MODE DOES
 - Saves the current Windows power plan before every Boost session
-- Activates Ultimate Performance and creates the plan automatically when absent
+- Uses Smart Power by default: Acer laptops keep the current custom/OEM plan such
+  as Nezha, while Desktop PCs activate or create Ultimate Performance
+- Advanced Mode can force Ultimate or keep the current plan on any supported PC
 - Enables Windows Game Mode
 - Disables Game DVR and background capture during the session
 - Requests the high-performance GPU for the detected game
 - Sets only the game process to AboveNormal priority
 - Disables Windows power throttling for the game process and keeps Dynamic
   Priority Boost enabled
+- Verifies which process settings were actually accepted and never retries a
+  blocked anti-cheat protected process in a loop
 - Restores the original power plan and registry values when the session ends
 
 ACER + NITROSENSE MODE
@@ -46,7 +50,22 @@ ADVANCED MODE
 - The ADVANCED BEST button is always visible in the main window
 - Six controls independently manage Game Mode, capture, GPU preference,
   AboveNormal priority, process power throttling and Dynamic Priority Boost
-- RESET BEST enables all six controls; Ultimate Performance remains mandatory
+- Power Plan has SMART, ULTIMATE and KEEP CURRENT choices
+- RESET BEST enables all six controls and selects the recommended SMART policy
+
+GRAPHICS ADVISOR
+- Reads NVIDIA GPU capability and display scan-out status without changing it
+- Separates DLSS Super Resolution, Frame Generation, Reflex, NIS and Smooth Motion
+- Does not claim that a feature is active when only the hardware is capable
+- Competitive games are guided toward native resolution and in-game Reflex first
+
+FRAME LAB
+- Runs only when the user presses CAPTURE, for 15 seconds after a 3-second delay
+- Uses the official Intel-signed PresentMon 2.5.1 standalone console binary
+- Reports app-present Average FPS, 1% Low, P95 frame time and Present Mode
+- Keeps Baseline and Boosted results in memory for an A/B comparison
+- Deletes the temporary CSV immediately after analysis and never runs during the
+  ordinary Boost monitor
 
 ADMIN PERMISSION
 - The portable app and installed app request Administrator permission at launch
@@ -60,9 +79,15 @@ HOW TO USE
 4. Game Boost restores the previous configuration after the game closes.
 
 RECOVERY
-- The previous state is saved under %LOCALAPPDATA%\CodexGameBoost before changes.
+- Privileged recovery state is saved under the administrator-protected
+  HKLM\SOFTWARE\GameBoostPro key before changes.
+- User preferences remain under %LOCALAPPDATA%\CodexGameBoost.
+- Valid state from an older release is allowlisted and migrated once; unverifiable
+  process identity is discarded instead of being trusted.
+- Recovery is bound to the Windows account that started the Boost session.
 - If Windows or the app closes unexpectedly, reopen Game Boost Pro and press RESTORE.
-- Uninstalling the app preserves this recovery/configuration directory.
+- The uninstaller blocks removal while a RESTORE is still pending and preserves
+  the user's preferences after normal removal.
 
 PERFORMANCE NOTE
 Game Boost cannot create performance beyond the CPU, GPU, cooling and power limits
@@ -76,7 +101,11 @@ MONITORING OVERHEAD
 - CPU, memory and GPU telemetry pauses while the app is hidden in the tray; game
   detection and automatic restore remain active.
 - Recovery state is cached in memory during play, while RESTORE deliberately reads
-  the saved file again so crash recovery remains authoritative.
+  the protected saved state again so crash recovery remains authoritative.
 - This release does not run continuous frame capture or inject an overlay into games.
 
-Game Boost Pro 3.1.1 is distributed under the MIT License.
+THIRD-PARTY COMPONENT
+PresentMon 2.5.1 is redistributed under its MIT License. The portable package and
+installed application include tools\PresentMon-LICENSE.txt.
+
+Game Boost Pro 3.2.0 is distributed under the MIT License.
