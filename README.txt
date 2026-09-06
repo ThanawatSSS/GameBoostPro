@@ -1,4 +1,4 @@
-Game Boost Pro 3.2.0
+Game Boost Pro 3.3.1
 ====================
 
 SUPPORTED PLATFORMS
@@ -13,11 +13,21 @@ NOT SUPPORTED YET
 The app detects unsupported laptops and blocks Boost. This prevents a generic
 power profile from competing with an untested OEM control application.
 
-WHAT BEST MODE DOES
+PROFILES AND LANGUAGE
+- Thai by default, with a TH/EN switch for the app and its dialogs
+- Light: Windows Game Mode only; retains power plan and process scheduling
+- Balanced (default): adds allowed GPU preference and background-capture settings
+- Performance: adds allowed AboveNormal, QoS and Dynamic Priority Boost settings
+- Master (cyan) changes games that inherit Master, without erasing Overrides
+- Check Override (amber) to set a game-specific level; uncheck to inherit Master
+- Apply Master to all clears every Override after confirmation
+- During Boost, changes apply next session; the active recovery record is unchanged
+
+WHAT PERFORMANCE CAN DO
 - Saves the current Windows power plan before every Boost session
-- Uses Smart Power by default: Acer laptops keep the current custom/OEM plan such
-  as Nezha, while Desktop PCs activate or create Ultimate Performance
-- Advanced Mode can force Ultimate or keep the current plan on any supported PC
+- Acer laptops keep the current custom/OEM plan, such as Nezha
+- Desktop Performance uses the Advanced power choice; Smart activates or creates Ultimate
+- Light and Balanced keep the current power plan on all supported systems
 - Enables Windows Game Mode
 - Disables Game DVR and background capture during the session
 - Requests the high-performance GPU for the detected game
@@ -43,23 +53,34 @@ GAME LIBRARY
 - Detects installed games from Steam, Epic Games and Riot
 - Detects popular running games such as CS2, PUBG and VALORANT
 - Search and filter by Steam, Epic, Riot or Manual source
-- Use PLAY NOW to select and launch, or USE PROFILE to select without launching
-- Use ADD EXE for standalone games or unusual launcher layouts
+- Use the launch action to select and launch, or select a profile without launching
+- Use the add-game action for standalone games or unusual launcher layouts
 
 ADVANCED MODE
-- The ADVANCED BEST button is always visible in the main window
+- Advanced Settings stays available during Boost; edits apply next session
 - Six controls independently manage Game Mode, capture, GPU preference,
   AboveNormal priority, process power throttling and Dynamic Priority Boost
-- Power Plan has SMART, ULTIMATE and KEEP CURRENT choices
-- RESET BEST enables all six controls and selects the recommended SMART policy
+- Power Plan has SMART, ULTIMATE and KEEP CURRENT choices for desktop Performance
+- Reset to defaults enables all six controls and selects the SMART policy
 
-GRAPHICS ADVISOR
+GRAPHICS
+- Settings: Save allowed high-performance GPU and background-capture choices
+- These global permissions are applied by the selected Boost level next session
+- Opens Windows Graphics, the installed NVIDIA App, or installed Control Panel
+- Supports both standalone and Microsoft Store Control Panel installations
+- Missing apps show a download or Store action instead of a broken launch action
+- GPU compatibility is a separate view; DLSS / Reflex / Frame Gen are set in-game
 - Reads NVIDIA GPU capability and display scan-out status without changing it
 - Separates DLSS Super Resolution, Frame Generation, Reflex, NIS and Smooth Motion
 - Does not claim that a feature is active when only the hardware is capable
 - Competitive games are guided toward native resolution and in-game Reflex first
 
 FRAME LAB
+- Open directly from the dashboard; the dashboard stays usable for Boost / Restore
+- Start the game, restore normal mode and record Baseline in a repeatable scene
+- Return to the dashboard, enable Boost and record Boosted in the same scene
+- Only the capture action matching the current mode is available
+- The app waits for a detected live game; selecting an installed game is not enough
 - Runs only when the user presses CAPTURE, for 15 seconds after a 3-second delay
 - Uses the official Intel-signed PresentMon 2.5.1 standalone console binary
 - Reports app-present Average FPS, 1% Low, P95 frame time and Present Mode
@@ -68,6 +89,7 @@ FRAME LAB
   ordinary Boost monitor
 
 ADMIN PERMISSION
+- Admin granted is a non-interactive status, not a disabled or no-op button
 - The portable app and installed app request Administrator permission at launch
 - Setup also requests Administrator permission to install under Program Files
 - The app does not inject code, modify game files, disable anti-cheat or overclock
@@ -77,6 +99,8 @@ HOW TO USE
 2. Start GameBoostPro.exe and approve the Windows UAC prompt.
 3. Leave automatic detection enabled and launch a game normally.
 4. Game Boost restores the previous configuration after the game closes.
+5. Manual Restore pauses automatic Boost until the game exits. Manually starting
+   Boost or re-enabling Auto Mode resumes it immediately.
 
 RECOVERY
 - Privileged recovery state is saved under the administrator-protected
@@ -100,6 +124,10 @@ MONITORING OVERHEAD
   a running game and active Boost state are stable.
 - CPU, memory and GPU telemetry pauses while the app is hidden in the tray; game
   detection and automatic restore remain active.
+- The telemetry checkbox can pause these counters while the window is open.
+- GPU 3D reports the busiest 3D engine, without adding separate GPUs together.
+- An unavailable reading is shown as --. High GPU utilization is not a temperature
+  or overheating warning.
 - Recovery state is cached in memory during play, while RESTORE deliberately reads
   the protected saved state again so crash recovery remains authoritative.
 - This release does not run continuous frame capture or inject an overlay into games.
@@ -108,4 +136,4 @@ THIRD-PARTY COMPONENT
 PresentMon 2.5.1 is redistributed under its MIT License. The portable package and
 installed application include tools\PresentMon-LICENSE.txt.
 
-Game Boost Pro 3.2.0 is distributed under the MIT License.
+Game Boost Pro 3.3.1 is distributed under the MIT License.

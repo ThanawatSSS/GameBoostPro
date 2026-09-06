@@ -43,6 +43,9 @@ internal static class GuiPerfProbe
         bool graphicsPolicyValid = ValidateGraphicsPolicy(assembly);
         bool frameAnalyzerValid = ValidateFrameBenchmarkAnalyzer(assembly);
         bool recoveryPolicyValid = ValidateRecoveryStatePolicy(assembly);
+        bool gpuAggregationValid = ValidateGpuAggregation(assembly);
+        bool nativePowerQueryValid = ValidateNativePowerQuery(assembly);
+        bool telemetryConfigValid = ValidateTelemetryConfig(assembly);
         Type formType = assembly.GetType("GameBoostPro.MainForm", true);
         Stopwatch startup = Stopwatch.StartNew();
         Form form = (Form)Activator.CreateInstance(formType, true);
@@ -104,13 +107,76 @@ internal static class GuiPerfProbe
         Console.WriteLine("frame_session_isolation={0}", frameSessionIsolationValid);
         Console.WriteLine("frame_target_identity={0}", frameTargetIdentityValid);
         Console.WriteLine("recovery_state_policy={0}", recoveryPolicyValid);
+        Console.WriteLine("gpu_engine_aggregation={0}", gpuAggregationValid);
+        Console.WriteLine("native_power_query={0}", nativePowerQueryValid);
+        Console.WriteLine("telemetry_config_roundtrip={0}", telemetryConfigValid);
         form.Dispose();
         return startup.Elapsed.TotalMilliseconds <= 1500.0 && monitorP95 <= 16.0 &&
             metricsP95 <= 25.0 && detectionP95 <= 25.0 && dialPaintP95 <= 16.0 &&
             cachedDetectionP95 <= 10.0 && stateCacheValid && processRetuneValid &&
             processIdentityValid && boostTargetResolutionValid && powerPolicyValid &&
             graphicsPolicyValid && frameAnalyzerValid && frameSessionIsolationValid &&
-            frameTargetIdentityValid && recoveryPolicyValid ? 0 : 1;
+            frameTargetIdentityValid && recoveryPolicyValid && gpuAggregationValid && nativePowerQueryValid &&
+            telemetryConfigValid ? 0 : 1;
+    }
+
+    private static bool ValidateGpuAggregation(Assembly assembly)
+    {
+        Type reader = assembly.GetType("GameBoostPro.GpuUsageReader", true);
+        BindingFlags flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo add = reader.GetMethod("AddEngineUsage", flags);
+        MethodInfo busiest = reader.GetMethod("GetBusiestEngine", flags);
+        Dictionary<string, float> engines = new Dictionary<string, float>();
+        bool emptyIsUnknown = Single.IsNaN((float)busiest.Invoke(null, new object[] { engines }));
+        add.Invoke(null, new object[] { engines, "pid_10_luid_0x00_0x01_phys_0_eng_0_engtype_3D", 30f });
+        add.Invoke(null, new object[] { engines, "pid_11_luid_0x00_0x01_phys_0_eng_0_engtype_3D", 25f });
+        add.Invoke(null, new object[] { engines, "pid_10_luid_0x00_0x02_phys_0_eng_0_engtype_3D", 80f });
+        add.Invoke(null, new object[] { engines, "pid_10_luid_0x00_0x01_phys_0_eng_1_engtype_3D", 50f });
+        add.Invoke(null, new object[] { engines, "pid_12_luid_0x00_0x02_phys_0_eng_0_engtype_3D", Single.NaN });
+        add.Invoke(null, new object[] { engines, "pid_12_luid_0x00_0x03_phys_0_eng_0_engtype_Copy", 100f });
+        bool separateEngines = engines.Count == 3 && (float)busiest.Invoke(null, new object[] { engines }) == 80f;
+        add.Invoke(null, new object[] { engines, "pid_12_luid_0x00_0x02_phys_0_eng_0_engtype_3D", 30f });
+        return emptyIsUnknown && separateEngines && (float)busiest.Invoke(null, new object[] { engines }) == 100f;
+    }
+
+    private static bool ValidateNativePowerQuery(Assembly assembly)
+    {
+        Type tuner = assembly.GetType("GameBoostPro.SystemTuner", true);
+        BindingFlags flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        MethodInfo query = tuner.GetMethod("GetActivePowerPlan", flags);
+        object plan = query.Invoke(null, null);
+        string guid = Convert.ToString(plan.GetType().GetProperty("Guid").GetValue(plan, null));
+        string name = Convert.ToString(plan.GetType().GetProperty("Name").GetValue(plan, null));
+        using (Process process = Process.Start(new ProcessStartInfo("powercfg.exe", "/getactivescheme")
+            { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true }))
+        {
+            string output = process.StandardOutput.ReadToEnd();
+            process.WaitForExit();
+            if (process.ExitCode != 0 || output.IndexOf(guid, StringComparison.OrdinalIgnoreCase) < 0 ||
+                String.IsNullOrWhiteSpace(name)) return false;
+        }
+        bool rejectsInvalid = false;
+        try { tuner.GetMethod("SetActivePowerPlan", flags).Invoke(null, new object[] { "invalid --scheme" }); }
+        catch (TargetInvocationException ex) { rejectsInvalid = ex.InnerException is InvalidOperationException; }
+        Measure("active_power_query", delegate { query.Invoke(null, null); });
+        return rejectsInvalid;
+    }
+
+    private static bool ValidateTelemetryConfig(Assembly assembly)
+    {
+        Type storage = assembly.GetType("GameBoostPro.Storage", true);
+        Type configType = assembly.GetType("GameBoostPro.AppConfig", true);
+        BindingFlags flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+        string path = Convert.ToString(storage.GetField("ConfigPath", flags).GetValue(null));
+        File.WriteAllText(path, "{\"Version\":5,\"PowerPlanMode\":\"KeepCurrent\",\"AutoMode\":false}");
+        object config = storage.GetMethod("LoadConfig", flags).Invoke(null, null);
+        bool defaultsOn = (bool)configType.GetProperty("ShowTelemetry").GetValue(config, null);
+        configType.GetProperty("ShowTelemetry").SetValue(config, false, null);
+        storage.GetMethod("SaveConfig", flags).Invoke(null, new object[] { config });
+        object restored = storage.GetMethod("LoadConfig", flags).Invoke(null, null);
+        bool retainsOff = !(bool)configType.GetProperty("ShowTelemetry").GetValue(restored, null);
+        File.Delete(path);
+        return defaultsOn && retainsOff;
     }
 
     private static bool ValidateFrameSessionIsolation(Assembly assembly)

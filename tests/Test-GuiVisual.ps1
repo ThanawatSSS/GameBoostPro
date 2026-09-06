@@ -1,3 +1,4 @@
+param([string]$EvidenceDirectory)
 $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
@@ -26,7 +27,14 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'GUI visual probe failed' }
 
     Add-Type -AssemblyName System.Drawing
-    foreach ($name in 'main.png','advanced.png','graphics-advisor.png','frame-lab.png') {
+    foreach ($name in 'main.png','main-narrow.png','main-wide.png','main-scale150.png','main-scale200.png','main-scale200-bottom.png',
+        'main-en.png','main-override.png','main-active.png','main-busy.png','main-search-empty.png',
+        'library.png','advanced.png','graphics-advisor.png','frame-lab.png',
+        'library-en.png','advanced-en.png','graphics-advisor-en.png','frame-lab-en.png',
+        'main-frame-entry.png','main-narrow-bottom.png','library-narrow.png','library-narrow-en.png',
+        'advanced-narrow.png','advanced-narrow-en.png','graphics-narrow.png','graphics-narrow-en.png',
+        'graphics-compatibility.png','graphics-compatibility-en.png','frame-boosted.png','frame-boosted-en.png',
+        'frame-empty.png','frame-empty-en.png') {
         $path = Join-Path $outputDirectory $name
         Assert-True (Test-Path $path) "visual artifact $name"
         Assert-True ((Get-Item $path).Length -gt 10000) "non-empty visual artifact $name"
@@ -38,6 +46,10 @@ try {
         finally {
             $image.Dispose()
         }
+    }
+    if ($EvidenceDirectory) {
+        New-Item -ItemType Directory -Path $EvidenceDirectory -Force | Out-Null
+        Get-ChildItem -LiteralPath $outputDirectory -Filter '*.png' | Copy-Item -Destination $EvidenceDirectory
     }
 }
 finally {

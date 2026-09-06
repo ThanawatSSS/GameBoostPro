@@ -11,15 +11,15 @@ using Microsoft.Win32;
 [assembly: AssemblyTitle("Game Boost Pro Setup")]
 [assembly: AssemblyProduct("Game Boost Pro")]
 [assembly: AssemblyCompany("Game Boost Pro")]
-[assembly: AssemblyVersion("3.2.0.0")]
-[assembly: AssemblyFileVersion("3.2.0.0")]
+[assembly: AssemblyVersion(GameBoostPro.BuildVersion.Assembly)]
+[assembly: AssemblyFileVersion(GameBoostPro.BuildVersion.Assembly)]
 
 namespace GameBoostProSetup
 {
     internal static class Product
     {
         public const string Name = "Game Boost Pro";
-        public const string Version = "3.2.0";
+        public const string Version = GameBoostPro.BuildVersion.Display;
         public const string FolderName = "Game Boost Pro";
         public const string AppFile = "GameBoostPro.exe";
         public const string ReadmeFile = "README.txt";
@@ -49,7 +49,7 @@ namespace GameBoostProSetup
                 using (RegistryKey key = Registry.LocalMachine.OpenSubKey(StateKey, false))
                     if (key != null && key.GetValue(StateValue, null) is string) return true;
             }
-            catch { }
+            catch { return true; }
             string legacyDirectory = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CodexGameBoost");
             return File.Exists(Path.Combine(legacyDirectory, "state-pro.json")) ||
@@ -65,7 +65,7 @@ namespace GameBoostProSetup
 
         public SetupForm()
         {
-            Text = "Game Boost Pro Setup";
+            Text = "Game Boost Pro Setup " + Product.Version;
             StartPosition = FormStartPosition.CenterScreen;
             ClientSize = new Size(590, 390);
             FormBorderStyle = FormBorderStyle.FixedSingle;
@@ -77,7 +77,7 @@ namespace GameBoostProSetup
             if (icon != null) Icon = icon;
 
             Controls.Add(MakeLabel("GAME BOOST", 30, 25, 185, 34, 19, FontStyle.Bold, ForeColor));
-            Label badge = MakeLabel("SETUP 3.2", 220, 30, 76, 24, 8, FontStyle.Bold, BackColor);
+            Label badge = MakeLabel("SETUP " + Product.Version, 220, 30, 108, 24, 8, FontStyle.Bold, BackColor);
             badge.BackColor = Color.FromArgb(199, 243, 107);
             badge.TextAlign = ContentAlignment.MiddleCenter;
             Controls.Add(badge);
@@ -123,6 +123,13 @@ namespace GameBoostProSetup
             installButton.FlatAppearance.BorderSize = 0;
             installButton.Click += InstallClick;
             Controls.Add(installButton);
+            string existing = Path.Combine(Product.InstallDirectory, Product.AppFile);
+            if (File.Exists(existing))
+            {
+                string prior = FileVersionInfo.GetVersionInfo(existing).FileVersion;
+                status.Text = "อัปเดต " + prior + " -> " + Product.Version + " / เก็บโปรไฟล์เดิม";
+                installButton.Text = "UPDATE";
+            }
         }
 
         private void InstallClick(object sender, EventArgs e)
@@ -145,19 +152,9 @@ namespace GameBoostProSetup
             Application.DoEvents();
             try
             {
-                Directory.CreateDirectory(Product.InstallDirectory);
-                ExtractResource("GameBoostPro.Payload.exe", Path.Combine(Product.InstallDirectory, Product.AppFile));
-                ExtractResource("GameBoostPro.Readme.txt", Path.Combine(Product.InstallDirectory, Product.ReadmeFile));
-                string toolsDirectory = Path.Combine(Product.InstallDirectory, Product.ToolsFolder);
-                Directory.CreateDirectory(toolsDirectory);
-                ExtractResource("GameBoostPro.PresentMon.exe", Path.Combine(toolsDirectory, Product.PresentMonFile));
-                ExtractResource("GameBoostPro.PresentMonLicense.txt",
-                    Path.Combine(toolsDirectory, Product.PresentMonLicenseFile));
-                File.Copy(Application.ExecutablePath, Path.Combine(Product.InstallDirectory, "Uninstall.exe"), true);
-                CreateShortcuts();
-                RegisterUninstaller();
+                InstallPackage();
                 installed = true;
-                status.Text = "ติดตั้ง Game Boost Pro 3.2.0 เรียบร้อยแล้ว";
+                status.Text = "ติดตั้ง Game Boost Pro " + Product.Version + " เรียบร้อยแล้ว";
                 status.ForeColor = Color.FromArgb(199, 243, 107);
                 installButton.Text = "LAUNCH";
                 installButton.Enabled = true;
@@ -171,41 +168,18 @@ namespace GameBoostProSetup
             }
         }
 
-        private static void ExtractResource(string resourceName, string destination)
+        internal static void InstallPackage()
         {
-            using (Stream input = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName))
-            {
-                if (input == null) throw new InvalidOperationException("ไม่พบไฟล์ติดตั้ง " + resourceName);
-                using (FileStream output = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None))
-                    input.CopyTo(output);
-            }
-        }
-
-        private static void CreateShortcuts()
-        {
-            string startFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms), Product.FolderName);
-            Directory.CreateDirectory(startFolder);
-            string target = Path.Combine(Product.InstallDirectory, Product.AppFile);
-            CreateShortcut(Path.Combine(startFolder, Product.Name + ".lnk"), target);
-            CreateShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory),
-                Product.Name + ".lnk"), target);
-        }
-
-        private static void CreateShortcut(string shortcutPath, string targetPath)
-        {
-            Type shellType = Type.GetTypeFromProgID("WScript.Shell");
-            object shell = Activator.CreateInstance(shellType);
-            object shortcut = shellType.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, shell,
-                new object[] { shortcutPath });
-            Type shortcutType = shortcut.GetType();
-            shortcutType.InvokeMember("TargetPath", BindingFlags.SetProperty, null, shortcut, new object[] { targetPath });
-            shortcutType.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, shortcut,
-                new object[] { Product.InstallDirectory });
-            shortcutType.InvokeMember("IconLocation", BindingFlags.SetProperty, null, shortcut,
-                new object[] { targetPath + ",0" });
-            shortcutType.InvokeMember("Save", BindingFlags.InvokeMethod, null, shortcut, null);
-            Marshal.FinalReleaseComObject(shortcut);
-            Marshal.FinalReleaseComObject(shell);
+            if (Product.IsAppRunning()) throw new InvalidOperationException("Exit Game Boost Pro before updating.");
+            if (Product.HasPendingRecoveryState()) throw new InvalidOperationException("Restore the active Boost session before updating.");
+            InstallerMaintenance.InstallFiles(Product.InstallDirectory, Application.ExecutablePath);
+            InstallerMaintenance.SyncShortcuts(Product.InstallDirectory,
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms),
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory),
+                Environment.GetFolderPath(Environment.SpecialFolder.Programs),
+                Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory));
+            RegisterUninstaller();
+            InstallerMaintenance.RefreshStartMenu();
         }
 
         private static void RegisterUninstaller()
@@ -259,6 +233,17 @@ namespace GameBoostProSetup
         {
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+            if (args.Length == 1 && args[0].Equals("/install", StringComparison.OrdinalIgnoreCase))
+            {
+                try { SetupForm.InstallPackage(); Environment.ExitCode = 0; }
+                catch (Exception ex)
+                {
+                    Environment.ExitCode = 1;
+                    string log = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CodexGameBoost");
+                    try { Directory.CreateDirectory(log); File.WriteAllText(Path.Combine(log, "setup-error.txt"), ex.ToString()); } catch { }
+                }
+                return;
+            }
             if (args.Length > 0 && args[0].Equals("/uninstall", StringComparison.OrdinalIgnoreCase))
             {
                 BeginUninstall();

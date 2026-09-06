@@ -11,12 +11,12 @@ function Assert-True([bool]$condition, [string]$message) {
 
 $appPath = (Resolve-Path (Join-Path $dist 'GameBoostPro.exe')).Path
 $setupPath = (Resolve-Path (Join-Path $dist 'GameBoostPro-Setup.exe')).Path
-$zipPath = (Resolve-Path (Join-Path $dist 'GameBoostPro-Portable-v3.2.0.zip')).Path
+$zipPath = (Resolve-Path (Join-Path $dist 'GameBoostPro-Portable-v3.3.1.zip')).Path
 $assembly = [Reflection.Assembly]::LoadFile($appPath)
 $flags = [Reflection.BindingFlags]'Static,Public,NonPublic'
 
-Assert-True ((Get-Item $appPath).VersionInfo.FileVersion -eq '3.2.0.0') 'app version'
-Assert-True ((Get-Item $setupPath).VersionInfo.FileVersion -eq '3.2.0.0') 'setup version'
+Assert-True ((Get-Item $appPath).VersionInfo.FileVersion -eq '3.3.1.0') 'app version'
+Assert-True ((Get-Item $setupPath).VersionInfo.FileVersion -eq '3.3.1.0') 'setup version'
 
 $platformDetector = $assembly.GetType('GameBoostPro.PlatformDetector')
 $evaluate = $platformDetector.GetMethod('Evaluate', $flags)
@@ -82,6 +82,9 @@ foreach ($required in 'GameBoostPro.exe','README.txt','LICENSE','tools/PresentMo
 $appManifest = Get-Content (Join-Path $root 'src\GameBoostPro.manifest') -Raw
 $setupManifest = Get-Content (Join-Path $root 'installer\GameBoostProInstaller.manifest') -Raw
 $setupSource = Get-Content (Join-Path $root 'installer\GameBoostProInstaller.cs') -Raw
+Assert-True (([xml]$appManifest).assembly.assemblyIdentity.version -eq '3.3.1.0') 'app manifest version'
+Assert-True (([xml]$setupManifest).assembly.assemblyIdentity.version -eq '3.3.1.0') 'setup manifest version'
+Assert-True ($setupSource -notmatch 'SETUP 3\.[0-2]') 'no stale setup version label'
 Assert-True ($appManifest -match 'requireAdministrator') 'app requests UAC'
 Assert-True ($setupManifest -match 'requireAdministrator') 'setup requests UAC'
 Assert-True ($setupSource -match 'HasPendingRecoveryState') `
@@ -95,7 +98,7 @@ Assert-True ($source -match 'Game Boost Pro Ultimate\|Ultimate Performance') 'ex
 Assert-True ($source -notmatch 'HighPerformanceGuid') 'no High Performance fallback'
 Assert-True ($source -match 'PowerPlanPolicy\.ShouldKeepCurrent') 'Smart Power policy'
 Assert-True ($source -match 'SMART \(แนะนำ\).*ULTIMATE.*KEEP CURRENT') 'Power Plan selector'
-Assert-True ($source -match 'ADVANCED  BEST') 'visible Advanced Mode'
+Assert-True ($source -match 'advancedButton.Text = UiText.T\("ตั้งค่าขั้นสูง", "Advanced"\)') 'localized visible Advanced Mode'
 Assert-True ($source -match 'BoostTargetResolver\.ResolveGamePath\(candidate, config\.GamePath\)') `
     'detected game path never falls back to another configured title'
 Assert-True ($source -match 'GameProcessStartTimeUtcTicks') 'process start-time identity guard'
@@ -142,6 +145,12 @@ Assert-True ($source -match 'Storage\.HasRecoveryWarning') `
 Assert-True ($source -match 'GameBoostPro\.TestAppDirectory') 'isolated performance-test storage'
 Assert-True ($source -match 'ApplyGamePriority\(latest, snapshot\.Game\.Process\.Id\)') `
     'detected process ID is tuned directly'
+
+& (Join-Path $root 'tests\Test-Profiles.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Profile behavior tests failed' }
+
+& (Join-Path $root 'tests\Test-Installer.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Installer tests failed' }
 
 & (Join-Path $root 'tests\Test-Performance.ps1')
 if ($LASTEXITCODE -ne 0) { throw 'Performance tests failed' }

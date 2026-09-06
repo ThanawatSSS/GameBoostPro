@@ -1,6 +1,7 @@
 dist/
 bin/
 obj/
+artifacts/
 *.user
 *.suo
 *.tmp

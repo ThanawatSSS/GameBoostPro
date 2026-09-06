@@ -34,7 +34,11 @@ if ((Get-AuthenticodeSignature $presentMonSource).Status -ne 'Valid') {
     /reference:System.Management.dll `
     /reference:System.Web.Extensions.dll `
     /reference:System.Windows.Forms.dll `
-    "$root\src\GameBoostPro.cs"
+    "$root\src\GameBoostPro.cs" `
+    "$root\src\BuildVersion.cs" `
+    "$root\src\Dashboard.cs" `
+    "$root\src\GraphicsWorkspace.cs" `
+    "$root\src\BoostProfiles.cs"
 
 if ($LASTEXITCODE -ne 0) { throw 'GameBoostPro build failed' }
 
@@ -54,7 +58,9 @@ $presentMonLicenseResource = '/resource:{0},GameBoostPro.PresentMonLicense.txt' 
     $readmeResource `
     $presentMonResource `
     $presentMonLicenseResource `
-    "$root\installer\GameBoostProInstaller.cs"
+    "$root\installer\GameBoostProInstaller.cs" `
+    "$root\installer\InstallerMaintenance.cs" `
+    "$root\src\BuildVersion.cs"
 
 if ($LASTEXITCODE -ne 0) { throw 'Setup build failed' }
 
@@ -75,7 +81,8 @@ New-Item -ItemType Directory -Path $portableTools -Force | Out-Null
 Copy-Item $presentMonSource (Join-Path $portableTools 'PresentMon.exe') -Force
 Copy-Item $presentMonLicense (Join-Path $portableTools 'PresentMon-LICENSE.txt') -Force
 
-$zip = Join-Path $dist 'GameBoostPro-Portable-v3.2.0.zip'
+$version = [Reflection.AssemblyName]::GetAssemblyName((Join-Path $dist 'GameBoostPro.exe')).Version.ToString(3)
+$zip = Join-Path $dist "GameBoostPro-Portable-v$version.zip"
 if (Test-Path $zip) { Remove-Item -LiteralPath $zip -Force }
 Compress-Archive -Path "$portable\*" -DestinationPath $zip -CompressionLevel Optimal
 

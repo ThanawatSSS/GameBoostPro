@@ -21,8 +21,8 @@ using Microsoft.Win32;
 [assembly: System.Reflection.AssemblyDescription("Smart game detection and reversible Windows gaming optimization")]
 [assembly: System.Reflection.AssemblyProduct("Game Boost Pro")]
 [assembly: System.Reflection.AssemblyCompany("Local PC Tools")]
-[assembly: System.Reflection.AssemblyVersion("3.2.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("3.2.0.0")]
+[assembly: System.Reflection.AssemblyVersion(GameBoostPro.BuildVersion.Assembly)]
+[assembly: System.Reflection.AssemblyFileVersion(GameBoostPro.BuildVersion.Assembly)]
 
 namespace GameBoostPro
 {
@@ -142,7 +142,7 @@ namespace GameBoostPro
                     HasNitroSense = hasNitroSense,
                     IsSupported = true,
                     Title = "DESKTOP PC / NATIVE",
-                    Detail = "Game Boost ควบคุม Power Plan และ Windows gaming stack"
+                    Detail = UiText.T("Game Boost ควบคุม Power Plan และ Windows gaming stack", "Game Boost manages the power plan and Windows gaming settings")
                 };
             }
 
@@ -157,7 +157,7 @@ namespace GameBoostPro
                     HasNitroSense = true,
                     IsSupported = true,
                     Title = "ACER + NITROSENSE",
-                    Detail = "Game Boost คุม Power / NitroSense คุมพัดลมและฮาร์ดแวร์"
+                    Detail = UiText.T("Game Boost คุม Power / NitroSense คุมพัดลมและฮาร์ดแวร์", "Game Boost manages power / NitroSense manages fans and hardware")
                 };
             }
 
@@ -170,7 +170,7 @@ namespace GameBoostPro
                 HasNitroSense = hasNitroSense,
                 IsSupported = false,
                 Title = "LAPTOP NOT SUPPORTED",
-                Detail = manufacturer + " " + model + " / รุ่นนี้ยังไม่เปิด Boost"
+                Detail = manufacturer + " " + model + UiText.T(" / รุ่นนี้ยังไม่เปิด Boost", " / Boost is unavailable on this model")
             };
         }
 
@@ -271,11 +271,21 @@ namespace GameBoostPro
         public bool UseHighQos { get; set; }
         public bool UseDynamicPriorityBoost { get; set; }
         public string PowerPlanMode { get; set; }
+        public bool ShowTelemetry { get; set; }
+        public string Language { get; set; }
+        public string DefaultPreset { get; set; }
+        public Dictionary<string, string> GamePresets { get; set; }
+        public List<GameInstall> ManualGames { get; set; }
 
         public AppConfig()
         {
-            Version = 5;
+            Version = 6;
+            Language = "TH";
+            DefaultPreset = BoostProfiles.Balanced;
+            GamePresets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            ManualGames = new List<GameInstall>();
             AutoMode = true;
+            ShowTelemetry = true;
             PowerPlanMode = PowerPlanPolicy.Smart;
             ResetAdvancedDefaults();
         }
@@ -305,6 +315,7 @@ namespace GameBoostPro
         public int Version { get; set; }
         public string OwnerSid { get; set; }
         public string EnabledAt { get; set; }
+        public string Preset { get; set; }
         public string PreviousPowerGuid { get; set; }
         public string PreviousPowerName { get; set; }
         public string TargetPowerGuid { get; set; }
@@ -407,9 +418,9 @@ namespace GameBoostPro
         public static BoostState SanitizeMigratedState(BoostState state, string ownerSid)
         {
             if (state == null || !IsValidPowerGuid(state.PreviousPowerGuid))
-                throw new InvalidOperationException("ข้อมูล Power Plan รุ่นเก่าไม่ถูกต้อง");
+                throw new InvalidOperationException(UiText.T("ข้อมูล Power Plan รุ่นเก่าไม่ถูกต้อง", "Invalid legacy power plan data"));
             if (String.IsNullOrWhiteSpace(ownerSid))
-                throw new InvalidOperationException("ระบุเจ้าของข้อมูลกู้คืนไม่ได้");
+                throw new InvalidOperationException(UiText.T("ระบุเจ้าของข้อมูลกู้คืนไม่ได้", "Cannot identify the recovery data owner"));
             if (!String.IsNullOrWhiteSpace(state.TargetPowerGuid) &&
                 !IsValidPowerGuid(state.TargetPowerGuid)) state.TargetPowerGuid = "";
             List<RegistrySnapshot> safe = new List<RegistrySnapshot>();
@@ -438,7 +449,7 @@ namespace GameBoostPro
             state.ProcessTuningApplied = false;
             state.ProcessTuningAttempted = true;
             state.ProcessTuningStatus = "LegacyUnverified";
-            state.ProcessTuningDetail = "ย้ายสถานะรุ่นเก่าอย่างปลอดภัย และไม่คืนค่าโปรเซสที่ยืนยัน identity ไม่ได้";
+            state.ProcessTuningDetail = UiText.T("ย้ายสถานะรุ่นเก่าอย่างปลอดภัย และไม่คืนค่าโปรเซสที่ยืนยัน identity ไม่ได้", "Legacy state migrated; processes with unverified identity will not be restored");
             state.PriorityVerified = false;
             state.PriorityBoostVerified = false;
             state.PowerThrottlingVerified = false;
@@ -493,7 +504,7 @@ namespace GameBoostPro
             bool rtx = nvidia && series >= 20;
             return new GraphicsCapabilities
             {
-                GpuName = String.IsNullOrWhiteSpace(name) ? "ไม่พบข้อมูล GPU" : name.Trim(),
+                GpuName = String.IsNullOrWhiteSpace(name) ? UiText.T("ไม่พบข้อมูล GPU", "No GPU data") : name.Trim(),
                 IsNvidia = nvidia,
                 IsRtx = rtx,
                 RtxSeries = series,
@@ -552,13 +563,13 @@ namespace GameBoostPro
             return new GraphicsAdvisorSnapshot
             {
                 Capabilities = capabilities,
-                DriverVersion = String.IsNullOrWhiteSpace(nvidiaDriver) ? "ไม่ทราบ" : nvidiaDriver,
+                DriverVersion = String.IsNullOrWhiteSpace(nvidiaDriver) ? UiText.T("ไม่ทราบ", "Unknown") : nvidiaDriver,
                 DisplayRoute = route,
                 NisEligibility = GetNisEligibility(capabilities.IsNvidia, route),
                 HasHybridGraphics = capabilities.IsNvidia && hasOtherGpu,
                 HasNvidiaApp = hasNvidiaApp,
                 NvidiaAppVersion = appVersion,
-                GameName = String.IsNullOrWhiteSpace(gameName) ? "ยังไม่ได้เลือกเกม" : gameName,
+                GameName = String.IsNullOrWhiteSpace(gameName) ? UiText.T("ยังไม่ได้เลือกเกม", "No game selected") : gameName,
                 GamePath = gamePath ?? "",
                 HasDlssLibraryHint = dlssHint,
                 HasFrameGenerationLibraryHint = frameGenerationHint,
@@ -705,15 +716,15 @@ namespace GameBoostPro
 
         public static FrameBenchmarkResult AnalyzeCsv(string path, string slot, string gameName)
         {
-            if (!File.Exists(path)) throw new InvalidOperationException("ไม่พบผล Frame Test");
+            if (!File.Exists(path)) throw new InvalidOperationException(UiText.T("ไม่พบผล Frame Test", "No Frame Test results"));
             string[] lines = File.ReadAllLines(path);
-            if (lines.Length < 2) throw new InvalidOperationException("PresentMon ไม่พบ frame จากเกมนี้");
+            if (lines.Length < 2) throw new InvalidOperationException(UiText.T("PresentMon ไม่พบ frame จากเกมนี้", "PresentMon found no frames for this game"));
             List<string> headers = ParseCsvLine(lines[0]);
             int frameTimeIndex = FindColumn(headers, "MsBetweenPresents");
             if (frameTimeIndex < 0) frameTimeIndex = FindColumn(headers, "MsBetweenDisplayChange");
             int swapChainIndex = FindColumn(headers, "SwapChainAddress");
             int presentModeIndex = FindColumn(headers, "PresentMode");
-            if (frameTimeIndex < 0) throw new InvalidOperationException("รูปแบบ CSV ของ PresentMon ไม่รองรับ");
+            if (frameTimeIndex < 0) throw new InvalidOperationException(UiText.T("รูปแบบ CSV ของ PresentMon ไม่รองรับ", "Unsupported PresentMon CSV format"));
 
             Dictionary<string, FrameGroup> groups = new Dictionary<string, FrameGroup>(StringComparer.OrdinalIgnoreCase);
             for (int i = 1; i < lines.Length; i++)
@@ -746,7 +757,7 @@ namespace GameBoostPro
             foreach (FrameGroup group in groups.Values)
                 if (primary == null || group.FrameTimes.Count > primary.FrameTimes.Count) primary = group;
             if (primary == null || primary.FrameTimes.Count < 30)
-                throw new InvalidOperationException("ข้อมูล frame น้อยเกินไป กรุณาเปิดเกมค้างไว้แล้วลองอีกครั้ง");
+                throw new InvalidOperationException(UiText.T("ข้อมูล frame น้อยเกินไป กรุณาเปิดเกมค้างไว้แล้วลองอีกครั้ง", "Not enough frames. Keep the game running and try again"));
 
             List<double> sorted = new List<double>(primary.FrameTimes);
             sorted.Sort();
@@ -888,7 +899,7 @@ namespace GameBoostPro
             long expectedStartTimeUtcTicks, string slot, string gameName)
         {
             if (!IsToolReady())
-                throw new InvalidOperationException("Frame Test component ไม่ครบหรือ hash ไม่ตรง กรุณาติดตั้งใหม่");
+                throw new InvalidOperationException(UiText.T("Frame Test component ไม่ครบหรือ hash ไม่ตรง กรุณาติดตั้งใหม่", "Frame Test component is missing or its hash does not match. Reinstall the app"));
             ValidateTargetProcess(processId, expectedProcessName, expectedStartTimeUtcTicks);
 
             string csvPath = Path.Combine(Path.GetTempPath(), "GameBoostPro-Frame-" +
@@ -910,11 +921,11 @@ namespace GameBoostPro
                     {
                         try { capture.Kill(); }
                         catch { }
-                        throw new InvalidOperationException("Frame Test ใช้เวลานานผิดปกติและถูกหยุดแล้ว");
+                        throw new InvalidOperationException(UiText.T("Frame Test ใช้เวลานานผิดปกติและถูกหยุดแล้ว", "Frame Test timed out and was stopped"));
                     }
                     string error = capture.StandardError.ReadToEnd();
                     if (capture.ExitCode != 0 && !File.Exists(csvPath))
-                        throw new InvalidOperationException("PresentMon จับ frame ไม่สำเร็จ " + error.Trim());
+                        throw new InvalidOperationException(UiText.T("PresentMon จับ frame ไม่สำเร็จ ", "PresentMon capture failed: ") + error.Trim());
                 }
                 ValidateTargetProcess(processId, expectedProcessName, expectedStartTimeUtcTicks);
                 return FrameBenchmarkAnalyzer.AnalyzeCsv(csvPath, slot, gameName);
@@ -942,7 +953,7 @@ namespace GameBoostPro
             catch
             {
                 throw new InvalidOperationException(
-                    "เกมที่เลือกปิดหรือเปลี่ยนโปรเซสแล้ว กรุณาเปิด Advisor ใหม่");
+                    UiText.T("เกมที่เลือกปิดหรือเปลี่ยนโปรเซสแล้ว กรุณาเปิด Advisor ใหม่", "The game exited or changed process. Reopen the Advisor"));
             }
         }
     }
@@ -995,6 +1006,31 @@ namespace GameBoostPro
 
         private static readonly List<GameInstall> Catalog = new List<GameInstall>();
         private static readonly object CatalogLock = new object();
+        private static volatile Dictionary<string, List<string>> manualGamePaths =
+            new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
+        public static void ConfigureManualGames(IList<GameInstall> games)
+        {
+            Dictionary<string, List<string>> paths = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            foreach (GameInstall game in games)
+            {
+                if (game == null || BoostProfiles.PathKey(game.LaunchTarget, false).Length == 0) continue;
+                string name = Path.GetFileNameWithoutExtension(game.LaunchTarget);
+                if (SafetyPolicy.IsProtectedProcess(name)) continue;
+                List<string> matches;
+                if (!paths.TryGetValue(name, out matches)) paths[name] = matches = new List<string>();
+                matches.Add(Path.GetFullPath(game.LaunchTarget));
+            }
+            manualGamePaths = paths;
+        }
+
+        internal static bool IsConfiguredManualPath(string path)
+        {
+            if (String.IsNullOrWhiteSpace(path)) return false;
+            List<string> paths;
+            return manualGamePaths.TryGetValue(Path.GetFileNameWithoutExtension(path), out paths) &&
+                paths.Exists(delegate(string entry) { return String.Equals(entry, path, StringComparison.OrdinalIgnoreCase); });
+        }
         private static readonly JavaScriptSerializer Json = new JavaScriptSerializer();
         private static volatile bool catalogLoaded;
         private static DateTime lastDeepScanUtc = DateTime.MinValue;
@@ -1072,6 +1108,15 @@ namespace GameBoostPro
                         if (process.Id == currentProcessId) continue;
                         string processName = process.ProcessName;
                         if (SafetyPolicy.IsProtectedProcess(processName)) continue;
+                        if (manualGamePaths.ContainsKey(processName))
+                        {
+                            string configuredPath = TryGetProcessPath(process);
+                            if (IsConfiguredManualPath(configuredPath))
+                            {
+                                result = CreateDetectedGame(processName, configuredPath, "MANUAL", process);
+                                break;
+                            }
+                        }
                         string knownName;
                         if (KnownProcesses.TryGetValue(processName, out knownName))
                         {
@@ -1151,7 +1196,7 @@ namespace GameBoostPro
 
             if (processId <= 0) return null;
             if (String.Equals(source, "MANUAL", StringComparison.OrdinalIgnoreCase) &&
-                !String.Equals(exePath, manualPath, StringComparison.OrdinalIgnoreCase))
+                !String.Equals(exePath, manualPath, StringComparison.OrdinalIgnoreCase) && !IsConfiguredManualPath(exePath))
             {
                 ClearRunningGameCache(processId);
                 return null;
@@ -1485,6 +1530,8 @@ namespace GameBoostPro
                         config.Version = 5;
                         changed = true;
                     }
+                    BoostProfiles.NormalizeConfig(config);
+                    if (config.Version < 6) { config.Version = 6; changed = true; }
                     if (changed) SaveConfig(config);
                     return config;
                 }
@@ -1634,7 +1681,7 @@ namespace GameBoostPro
             }
             catch
             {
-                recoveryWarning = "พบข้อมูลกู้คืนรุ่นเก่าที่ตรวจสอบไม่ได้ ระบบจึงบล็อก Boost เพื่อความปลอดภัย";
+                recoveryWarning = UiText.T("พบข้อมูลกู้คืนรุ่นเก่าที่ตรวจสอบไม่ได้ ระบบจึงบล็อก Boost เพื่อความปลอดภัย", "Unverified legacy recovery data found. Boost is blocked for safety");
             }
         }
 
@@ -1665,7 +1712,7 @@ namespace GameBoostPro
             if (state == null || String.IsNullOrWhiteSpace(ownerSid) ||
                 !String.Equals(state.OwnerSid, ownerSid, StringComparison.OrdinalIgnoreCase))
             {
-                recoveryWarning = "Game Mode นี้เริ่มจาก Windows account อื่น จึงไม่อนุญาตให้คืนค่าข้ามบัญชี";
+                recoveryWarning = UiText.T("Game Mode นี้เริ่มจาก Windows account อื่น จึงไม่อนุญาตให้คืนค่าข้ามบัญชี", "This session belongs to another Windows account. Cross-account restore is blocked");
                 throw new InvalidOperationException(recoveryWarning);
             }
             return state;
@@ -1676,10 +1723,10 @@ namespace GameBoostPro
             if (!ProtectedStateStore) return;
             string ownerSid = GetCurrentOwnerSid();
             if (String.IsNullOrWhiteSpace(ownerSid))
-                throw new InvalidOperationException("ระบุ Windows account สำหรับข้อมูลกู้คืนไม่ได้");
+                throw new InvalidOperationException(UiText.T("ระบุ Windows account สำหรับข้อมูลกู้คืนไม่ได้", "Cannot identify the Windows account for recovery data"));
             if (!String.IsNullOrWhiteSpace(state.OwnerSid) &&
                 !String.Equals(state.OwnerSid, ownerSid, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("ไม่อนุญาตให้เขียนข้อมูลกู้คืนข้าม Windows account");
+                throw new InvalidOperationException(UiText.T("ไม่อนุญาตให้เขียนข้อมูลกู้คืนข้าม Windows account", "Cannot write recovery data for another Windows account"));
             state.OwnerSid = ownerSid;
         }
 
@@ -1703,7 +1750,7 @@ namespace GameBoostPro
             }
             using (RegistryKey key = Registry.LocalMachine.CreateSubKey(StateRegistrySubKey))
             {
-                if (key == null) throw new InvalidOperationException("สร้างพื้นที่กู้คืนแบบ Admin ไม่สำเร็จ");
+                if (key == null) throw new InvalidOperationException(UiText.T("สร้างพื้นที่กู้คืนแบบ Admin ไม่สำเร็จ", "Cannot create protected recovery storage"));
                 key.SetValue(StateRegistryValue, serialized, RegistryValueKind.String);
             }
         }
@@ -1760,11 +1807,52 @@ namespace GameBoostPro
 
         public static PowerPlan GetActivePowerPlan()
         {
-            string output = RunPowerCfg("/getactivescheme");
-            Match guid = Regex.Match(output, @"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}");
-            if (!guid.Success) throw new InvalidOperationException("อ่านแผนพลังงานปัจจุบันไม่สำเร็จ");
-            Match name = Regex.Match(output, @"\(([^)]+)\)\s*$");
-            return new PowerPlan { Guid = guid.Value, Name = name.Success ? name.Groups[1].Value : "แผนปัจจุบัน" };
+            IntPtr pointer = IntPtr.Zero;
+            try
+            {
+                uint error = PowerGetActiveScheme(IntPtr.Zero, out pointer);
+                if (error != 0) throw new Win32Exception((int)error, UiText.T("อ่านแผนพลังงานไม่สำเร็จ", "Cannot read the active power plan"));
+                if (pointer == IntPtr.Zero) throw new InvalidOperationException(UiText.T("Windows ไม่ส่งแผนพลังงานกลับมา", "Windows returned no active power plan"));
+                Guid guid = (Guid)Marshal.PtrToStructure(pointer, typeof(Guid));
+                string name = UiText.T("แผนปัจจุบัน", "Current plan");
+                uint size = 0;
+                if (PowerReadFriendlyName(IntPtr.Zero, ref guid, IntPtr.Zero, IntPtr.Zero, null, ref size) == 0 &&
+                    size > 0 && size <= 65536)
+                {
+                    byte[] buffer = new byte[size];
+                    if (PowerReadFriendlyName(IntPtr.Zero, ref guid, IntPtr.Zero, IntPtr.Zero, buffer, ref size) == 0)
+                        name = Encoding.Unicode.GetString(buffer).TrimEnd('\0');
+                }
+                return new PowerPlan { Guid = guid.ToString(), Name = name };
+            }
+            finally { if (pointer != IntPtr.Zero) LocalFree(pointer); }
+        }
+
+        private static void SetActivePowerPlan(string value)
+        {
+            Guid guid;
+            if (!Guid.TryParse(value, out guid)) throw new InvalidOperationException(UiText.T("Power Plan ไม่ถูกต้อง", "Invalid power plan"));
+            value = guid.ToString();
+            if (String.Equals(GetActivePowerPlan().Guid, value, StringComparison.OrdinalIgnoreCase)) return;
+            uint error = PowerSetActiveScheme(IntPtr.Zero, ref guid);
+            if (error != 0) throw new Win32Exception((int)error, UiText.T("สลับแผนพลังงานไม่สำเร็จ", "Cannot switch power plan"));
+            if (!String.Equals(GetActivePowerPlan().Guid, value, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(UiText.T("Windows ไม่คงแผนพลังงานที่เลือกไว้", "Windows did not retain the selected power plan"));
+        }
+
+        [DllImport("powrprof.dll")]
+        private static extern uint PowerGetActiveScheme(IntPtr root, out IntPtr scheme);
+        [DllImport("powrprof.dll")]
+        private static extern uint PowerSetActiveScheme(IntPtr root, ref Guid scheme);
+        [DllImport("powrprof.dll")]
+        private static extern uint PowerReadFriendlyName(IntPtr root, ref Guid scheme, IntPtr subgroup,
+            IntPtr setting, [Out] byte[] buffer, ref uint size);
+        [DllImport("kernel32.dll")]
+        private static extern IntPtr LocalFree(IntPtr memory);
+
+        private static void ReportProgress(Action<string> progress, string message)
+        {
+            if (progress != null) progress(message);
         }
 
         public static string GetBestPerformanceScheme()
@@ -1779,7 +1867,7 @@ namespace GameBoostPro
             string output = RunPowerCfg("/duplicatescheme " + UltimateGuid);
             Match duplicated = Regex.Match(output, @"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}");
             if (!duplicated.Success)
-                throw new InvalidOperationException("สร้าง Ultimate Performance power plan ไม่สำเร็จ");
+                throw new InvalidOperationException(UiText.T("สร้าง Ultimate Performance power plan ไม่สำเร็จ", "Cannot create the Ultimate Performance plan"));
             RunPowerCfg("/changename " + duplicated.Value + " \"Game Boost Pro Ultimate\"");
             return duplicated.Value;
         }
@@ -1794,17 +1882,20 @@ namespace GameBoostPro
         }
 
         public static BoostState Enable(string gamePath, bool autoTriggered, int processId,
-            PlatformProfile platform, AppConfig options)
+            PlatformProfile platform, AppConfig options, Action<string> progress = null)
         {
-            if (Storage.HasState()) throw new InvalidOperationException("Game Mode เปิดอยู่แล้ว");
+            if (!Storage.UsesProtectedStateStore)
+                throw new InvalidOperationException("System tuning is disabled in the isolated test host.");
+            if (Storage.HasState()) throw new InvalidOperationException(UiText.T("Game Mode เปิดอยู่แล้ว", "Game Mode is already active"));
             if (Storage.HasRecoveryWarning)
                 throw new InvalidOperationException(Storage.RecoveryWarning +
-                    " กรุณาติดต่อผู้ดูแลก่อนเปิด Boost รอบใหม่");
+                    UiText.T(" กรุณาติดต่อผู้ดูแลก่อนเปิด Boost รอบใหม่", " Contact an administrator before starting another Boost"));
             if (platform == null || !platform.IsSupported)
-                throw new InvalidOperationException("แพลตฟอร์มนี้ยังไม่รองรับ Boost เพื่อป้องกันการชนกับซอฟต์แวร์ OEM");
+                throw new InvalidOperationException(UiText.T("แพลตฟอร์มนี้ยังไม่รองรับ Boost เพื่อป้องกันการชนกับซอฟต์แวร์ OEM", "Boost is unsupported on this platform to prevent OEM software conflicts"));
             if (!IsAdmin())
-                throw new InvalidOperationException("Best Mode ต้องใช้สิทธิ์ Administrator กรุณาเปิดโปรแกรมใหม่และกดยืนยัน UAC");
+                throw new InvalidOperationException(UiText.T("Best Mode ต้องใช้สิทธิ์ Administrator กรุณาเปิดโปรแกรมใหม่และกดยืนยัน UAC", "Administrator access is required. Restart the app and approve UAC"));
 
+            ReportProgress(progress, UiText.T("กำลังอ่านแผนพลังงาน", "Reading power plan"));
             PowerPlan current = GetActivePowerPlan();
             PowerPlan targetPower = ResolveTargetPowerPlan(current, platform, options);
             BoostState state = new BoostState
@@ -1812,6 +1903,7 @@ namespace GameBoostPro
                 Version = RecoveryStatePolicy.CurrentVersion,
                 OwnerSid = "",
                 EnabledAt = DateTime.Now.ToString("o", CultureInfo.InvariantCulture),
+                Preset = options.DefaultPreset,
                 PreviousPowerGuid = current.Guid,
                 PreviousPowerName = current.Name,
                 TargetPowerGuid = targetPower.Guid,
@@ -1826,7 +1918,7 @@ namespace GameBoostPro
                 UseHighQos = options.UseHighQos,
                 UseDynamicPriorityBoost = options.UseDynamicPriorityBoost,
                 ProcessTuningStatus = processId > 0 ? "Waiting" : "NoGame",
-                ProcessTuningDetail = processId > 0 ? "กำลังยืนยันค่าของโปรเซสเกม" : "รอโปรเซสเกมเริ่มทำงาน",
+                ProcessTuningDetail = processId > 0 ? UiText.T("กำลังยืนยันค่าของโปรเซสเกม", "Verifying game process settings") : UiText.T("รอโปรเซสเกมเริ่มทำงาน", "Waiting for the game process"),
                 Registry = new List<RegistrySnapshot>()
             };
 
@@ -1837,15 +1929,18 @@ namespace GameBoostPro
             if (options.PreferHighPerformanceGpu && !String.IsNullOrWhiteSpace(gamePath))
                 state.Registry.Add(Capture(@"Software\Microsoft\DirectX\UserGpuPreferences", gamePath));
 
+            ReportProgress(progress, UiText.T("กำลังบันทึกค่าเดิมสำหรับคืนค่า", "Saving original settings for recovery"));
             Storage.SaveState(state);
             try
             {
+                ReportProgress(progress, UiText.T("กำลังตั้งค่าพลังงาน", "Applying power settings"));
                 if (!String.Equals(current.Guid, targetPower.Guid, StringComparison.OrdinalIgnoreCase))
-                    RunPowerCfg("/S " + targetPower.Guid);
+                    SetActivePowerPlan(targetPower.Guid);
                 PowerPlan active = GetActivePowerPlan();
                 if (!String.Equals(active.Guid, targetPower.Guid, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidOperationException("Windows ไม่ยอมใช้ Power Plan ที่เลือกไว้");
+                    throw new InvalidOperationException(UiText.T("Windows ไม่ยอมใช้ Power Plan ที่เลือกไว้", "Windows rejected the selected power plan"));
 
+                ReportProgress(progress, UiText.T("กำลังปรับ Game Mode และการบันทึกหน้าจอ", "Applying Game Mode and capture settings"));
                 foreach (Tuple<string, string, object, RegistryValueKind> tweak in enabledTweaks)
                     SetRegistry(tweak.Item1, tweak.Item2, tweak.Item3, tweak.Item4);
 
@@ -1853,26 +1948,34 @@ namespace GameBoostPro
                     SetRegistry(@"Software\Microsoft\DirectX\UserGpuPreferences", gamePath,
                         "GpuPreference=2;", RegistryValueKind.String);
 
+                ReportProgress(progress, UiText.T("กำลังตรวจสอบค่าของโปรเซสเกม", "Checking game process settings"));
                 ApplyGamePriority(state);
                 return state;
             }
             catch
             {
-                try { Disable(); } catch { }
+                ReportProgress(progress, UiText.T("กำลังคืนค่าหลังพบปัญหา", "Restoring after an error"));
+                try { Disable(progress); } catch { }
                 throw;
             }
         }
 
-        public static void Disable()
+        public static void Disable(Action<string> progress = null)
         {
+            if (!Storage.UsesProtectedStateStore)
+                throw new InvalidOperationException("System tuning is disabled in the isolated test host.");
+            ReportProgress(progress, UiText.T("กำลังอ่านข้อมูลคืนค่า", "Reading recovery data"));
             if (Storage.HasCurrentState())
             {
                 BoostState state = Storage.LoadStateForRestore();
-                if (state == null) throw new InvalidOperationException("ข้อมูลคืนค่าเสียหาย กรุณาอย่าลบไฟล์สถานะ");
+                if (state == null) throw new InvalidOperationException(UiText.T("ข้อมูลคืนค่าเสียหาย กรุณาอย่าลบไฟล์สถานะ", "Recovery data is damaged. Do not delete the state file"));
 
+                ReportProgress(progress, UiText.T("กำลังคืนค่าของโปรเซสเกม", "Restoring game process settings"));
                 RestoreStoredProcessScheduling(state);
 
-                RunPowerCfg("/S " + state.PreviousPowerGuid);
+                ReportProgress(progress, UiText.T("กำลังคืนแผนพลังงานเดิม", "Restoring original power plan"));
+                SetActivePowerPlan(state.PreviousPowerGuid);
+                ReportProgress(progress, UiText.T("กำลังคืนค่าของ Windows", "Restoring Windows settings"));
                 foreach (RegistrySnapshot item in state.Registry) Restore(item);
                 Storage.DeleteState();
                 return;
@@ -1884,7 +1987,7 @@ namespace GameBoostPro
                 return;
             }
 
-            throw new InvalidOperationException("ไม่พบข้อมูลเดิมสำหรับคืนค่า");
+            throw new InvalidOperationException(UiText.T("ไม่พบข้อมูลเดิมสำหรับคืนค่า", "No original settings found"));
         }
 
         public static bool ApplyGamePriority(BoostState state)
@@ -1906,7 +2009,7 @@ namespace GameBoostPro
             if (game == null)
             {
                 state.ProcessTuningStatus = "NoGame";
-                state.ProcessTuningDetail = "รอโปรเซสเกมเริ่มทำงาน";
+                state.ProcessTuningDetail = UiText.T("รอโปรเซสเกมเริ่มทำงาน", "Waiting for the game process");
                 return false;
             }
 
@@ -1918,7 +2021,7 @@ namespace GameBoostPro
                     state.ProcessTuningAttempted = true;
                     state.ProcessTuningApplied = false;
                     state.ProcessTuningStatus = "NotRequested";
-                    state.ProcessTuningDetail = "ไม่ได้เลือกปรับ scheduling ของเกม";
+                    state.ProcessTuningDetail = UiText.T("ไม่ได้เลือกปรับ scheduling ของเกม", "Game scheduling was not requested");
                     Storage.SaveState(state);
                     return true;
                 }
@@ -1979,7 +2082,7 @@ namespace GameBoostPro
                 state.ProcessTuningAttempted = true;
                 state.ProcessTuningApplied = priorityCaptured || priorityBoostCaptured || throttleCaptured;
                 state.ProcessTuningStatus = "Applying";
-                state.ProcessTuningDetail = "บันทึกค่าเดิมแล้ว กำลังตรวจยืนยันผล";
+                state.ProcessTuningDetail = UiText.T("บันทึกค่าเดิมแล้ว กำลังตรวจยืนยันผล", "Original settings saved; verifying results");
                 Storage.SaveState(state);
 
                 int applied = 0;
@@ -2028,17 +2131,17 @@ namespace GameBoostPro
                 if (verified == requested)
                 {
                     state.ProcessTuningStatus = "Applied";
-                    state.ProcessTuningDetail = "ยืนยันค่าที่เลือกครบ " + verified + "/" + requested;
+                    state.ProcessTuningDetail = UiText.T("ยืนยันค่าที่เลือกครบ ", "All selected settings verified: ") + verified + "/" + requested;
                 }
                 else if (applied > 0)
                 {
                     state.ProcessTuningStatus = "Partial";
-                    state.ProcessTuningDetail = "ยืนยันได้ " + verified + "/" + requested + " ค่า เกมอาจจำกัดบางรายการ";
+                    state.ProcessTuningDetail = UiText.T("ยืนยันได้ ", "Verified: ") + verified + "/" + requested + UiText.T(" ค่า เกมอาจจำกัดบางรายการ", " settings. The game may restrict some changes");
                 }
                 else
                 {
                     state.ProcessTuningStatus = "Blocked";
-                    state.ProcessTuningDetail = "เกมหรือ anti-cheat ไม่อนุญาตให้เปลี่ยน scheduling";
+                    state.ProcessTuningDetail = UiText.T("เกมหรือ anti-cheat ไม่อนุญาตให้เปลี่ยน scheduling", "The game or anti-cheat blocked scheduling changes");
                 }
                 Storage.SaveState(state);
                 return verified == requested;
@@ -2048,7 +2151,7 @@ namespace GameBoostPro
                 state.ProcessTuningAttempted = true;
                 state.ProcessTuningApplied = false;
                 state.ProcessTuningStatus = "Blocked";
-                state.ProcessTuningDetail = "อ่าน identity หรือ scheduling ของเกมไม่ได้ และโปรแกรมจะไม่ลองซ้ำ";
+                state.ProcessTuningDetail = UiText.T("อ่าน identity หรือ scheduling ของเกมไม่ได้ และโปรแกรมจะไม่ลองซ้ำ", "Cannot read game identity or scheduling. No repeated attempts will be made");
                 try { Storage.SaveState(state); }
                 catch { }
                 return false;
@@ -2123,12 +2226,12 @@ namespace GameBoostPro
             if (verified != requested)
             {
                 state.ProcessTuningStatus = "NotRetained";
-                state.ProcessTuningDetail = "เกมคืนค่าบางรายการเอง ยืนยันได้ " + verified + "/" + requested +
-                    " และโปรแกรมจะไม่ฝืนตั้งซ้ำ";
+                state.ProcessTuningDetail = UiText.T("เกมคืนค่าบางรายการเอง ยืนยันได้ ", "The game reverted some settings. Verified: ") + verified + "/" + requested +
+                    UiText.T(" และโปรแกรมจะไม่ฝืนตั้งซ้ำ", "; no forced reapplication");
             }
             else
             {
-                state.ProcessTuningDetail = "ยืนยันซ้ำแล้วว่าค่ายังคงอยู่ " + verified + "/" + requested;
+                state.ProcessTuningDetail = UiText.T("ยืนยันซ้ำแล้วว่าค่ายังคงอยู่ ", "Retention verified: ") + verified + "/" + requested;
             }
             Storage.SaveState(state);
             return verified == requested;
@@ -2158,7 +2261,7 @@ namespace GameBoostPro
             state.ProcessTuningApplied = false;
             state.ProcessTuningAttempted = false;
             state.ProcessTuningStatus = "Waiting";
-            state.ProcessTuningDetail = "กำลังยืนยันค่าของโปรเซสเกม";
+            state.ProcessTuningDetail = UiText.T("กำลังยืนยันค่าของโปรเซสเกม", "Verifying game process settings");
             state.PriorityVerified = false;
             state.PriorityBoostVerified = false;
             state.PowerThrottlingVerified = false;
@@ -2386,7 +2489,7 @@ namespace GameBoostPro
                 string error = process.StandardError.ReadToEnd();
                 process.WaitForExit();
                 if (process.ExitCode != 0)
-                    throw new InvalidOperationException("ตั้งค่าแผนพลังงานไม่สำเร็จ " + error.Trim());
+                    throw new InvalidOperationException(UiText.T("ตั้งค่าแผนพลังงานไม่สำเร็จ ", "Power plan update failed: ") + error.Trim());
                 return output + "\n" + error;
             }
         }
@@ -2402,8 +2505,8 @@ namespace GameBoostPro
             {
                 string guid = Convert.ToString(plan["Guid"]);
                 if (!RecoveryStatePolicy.IsValidPowerGuid(guid))
-                    throw new InvalidOperationException("ข้อมูล Power Plan รุ่นเก่าไม่ถูกต้อง");
-                RunPowerCfg("/S " + guid);
+                    throw new InvalidOperationException(UiText.T("ข้อมูล Power Plan รุ่นเก่าไม่ถูกต้อง", "Invalid legacy power plan data"));
+                SetActivePowerPlan(guid);
             }
 
             object[] registry = root["Registry"] as object[];
@@ -2435,147 +2538,62 @@ namespace GameBoostPro
         private bool active;
         private bool busy;
         private bool hover;
-        private int phase;
-        private readonly Timer animation;
-        private readonly Pen thinRingPen;
-        private readonly Pen thickRingPen;
-        private readonly Pen borderPen;
-        private readonly Pen focusPen;
-        private readonly SolidBrush shadowBrush;
-        private readonly SolidBrush coreBrush;
-        private readonly SolidBrush eyebrowBrush;
-        private readonly SolidBrush actionBrush;
-        private readonly SolidBrush hintBrush;
-        private readonly Font eyebrowFont;
-        private readonly Font actionFont;
-        private readonly Font hintFont;
-
+        private readonly SolidBrush background = new SolidBrush(Palette.Lime);
         public event EventHandler BoostClick;
-
         public bool Active
         {
             get { return active; }
-            set { active = value; Invalidate(); }
+            set { if (active == value) return; active = value; Invalidate(); }
         }
-
         public bool Busy
         {
             get { return busy; }
-            set
-            {
-                busy = value;
-                animation.Enabled = value;
-                Invalidate();
-            }
+            set { if (busy == value) return; busy = value; Invalidate(); }
         }
-
         public BoostDial()
         {
-            Size = new Size(320, 320);
+            Size = new Size(186, 52);
+            Font = UiText.Body(13, FontStyle.Bold);
+            DoubleBuffered = true;
             TabStop = true;
             Cursor = Cursors.Hand;
-            DoubleBuffered = true;
-            thinRingPen = CreateRingPen(5f);
-            thickRingPen = CreateRingPen(8f);
-            borderPen = new Pen(Palette.Lime, 2f);
-            focusPen = new Pen(Palette.Amber, 1f) { DashStyle = DashStyle.Dot };
-            shadowBrush = new SolidBrush(Color.FromArgb(70, Color.Black));
-            coreBrush = new SolidBrush(Palette.Surface);
-            eyebrowBrush = new SolidBrush(Palette.Muted);
-            actionBrush = new SolidBrush(Palette.Lime);
-            hintBrush = new SolidBrush(Palette.Text);
-            eyebrowFont = new Font("Segoe UI", 9, FontStyle.Bold);
-            actionFont = new Font("Segoe UI Semibold", 25, FontStyle.Bold);
-            hintFont = new Font("Segoe UI", 9);
-            animation = new Timer();
-            animation.Interval = 55;
-            animation.Tick += delegate { phase = (phase + 1) % 24; Invalidate(); };
+            AccessibleRole = AccessibleRole.PushButton;
+            AccessibleName = "Boost / Restore";
         }
-
         protected override void OnMouseEnter(EventArgs e) { hover = true; Invalidate(); base.OnMouseEnter(e); }
         protected override void OnMouseLeave(EventArgs e) { hover = false; Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnGotFocus(EventArgs e) { base.OnGotFocus(e); Invalidate(); }
+        protected override void OnLostFocus(EventArgs e) { base.OnLostFocus(e); Invalidate(); }
+        protected override void OnEnabledChanged(EventArgs e) { base.OnEnabledChanged(e); Invalidate(); }
         protected override void OnMouseDown(MouseEventArgs e) { Focus(); base.OnMouseDown(e); }
         protected override void OnMouseClick(MouseEventArgs e)
         {
-            if (!busy && BoostClick != null) BoostClick(this, EventArgs.Empty);
+            if (Enabled && e.Button == MouseButtons.Left && !busy && BoostClick != null) BoostClick(this, EventArgs.Empty);
             base.OnMouseClick(e);
         }
         protected override void OnKeyDown(KeyEventArgs e)
         {
-            if (!busy && (e.KeyCode == Keys.Enter || e.KeyCode == Keys.Space) && BoostClick != null)
+            if (Enabled && !busy && (e.KeyCode == Keys.Enter || e.KeyCode == Keys.Space))
             {
-                BoostClick(this, EventArgs.Empty);
-                e.Handled = true;
+                if (BoostClick != null) BoostClick(this, EventArgs.Empty);
+                e.Handled = e.SuppressKeyPress = true;
             }
             base.OnKeyDown(e);
         }
-
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing)
-            {
-                animation.Dispose();
-                thinRingPen.Dispose();
-                thickRingPen.Dispose();
-                borderPen.Dispose();
-                focusPen.Dispose();
-                shadowBrush.Dispose();
-                coreBrush.Dispose();
-                eyebrowBrush.Dispose();
-                actionBrush.Dispose();
-                hintBrush.Dispose();
-                eyebrowFont.Dispose();
-                actionFont.Dispose();
-                hintFont.Dispose();
-            }
-            base.Dispose(disposing);
-        }
-
         protected override void OnPaint(PaintEventArgs e)
         {
-            Graphics g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            RectangleF ring = new RectangleF(28, 28, Width - 56, Height - 56);
-            Color accent = active ? Palette.Coral : Palette.Lime;
-
-            for (int i = 0; i < 24; i++)
-            {
-                int distance = (i - phase + 24) % 24;
-                Color color = busy && distance < 6 ? Palette.Amber :
-                    Color.FromArgb(active || hover ? 235 : 135, accent);
-                Pen pen = i % 3 == 0 ? thickRingPen : thinRingPen;
-                pen.Color = color;
-                g.DrawArc(pen, ring, -90 + i * 15 + 2, 10);
-            }
-
-            RectangleF core = new RectangleF(57, 57, Width - 114, Height - 114);
-            g.FillEllipse(shadowBrush, new RectangleF(core.X + 4, core.Y + 8, core.Width, core.Height));
-            coreBrush.Color = hover ? Palette.SurfaceHigh : Palette.Surface;
-            g.FillEllipse(coreBrush, core);
-            borderPen.Color = Color.FromArgb(95, accent);
-            g.DrawEllipse(borderPen, core);
-
-            string eyebrow = busy ? "กำลังปรับระบบ" : (active ? "GAME MODE  ON" : "STANDBY");
-            string action = active ? "RESTORE" : "BOOST";
-            string hint = active ? "กลับสู่โหมดปกติ" : "กดเพื่อเร่งเครื่อง";
-            actionBrush.Color = accent;
-            DrawCentered(g, eyebrow, eyebrowFont, eyebrowBrush, 119);
-            DrawCentered(g, action, actionFont, actionBrush, 145);
-            DrawCentered(g, hint, hintFont, hintBrush, 187);
-
-            if (Focused)
-                g.DrawEllipse(focusPen, new RectangleF(core.X - 6, core.Y - 6, core.Width + 12, core.Height + 12));
+            background.Color = !Enabled ? Palette.SurfaceHigh : busy ? Palette.Amber : active ? Palette.Coral :
+                hover ? Color.FromArgb(218, 255, 143) : Palette.Lime;
+            e.Graphics.FillRectangle(background, ClientRectangle);
+            string text = busy ? UiText.T("กำลังทำงาน", "Working") : active ? UiText.T("คืนค่าเดิม", "Restore") : "BOOST";
+            TextRenderer.DrawText(e.Graphics, text, Font, ClientRectangle, Enabled ? Palette.Back : Palette.Muted,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+            if (Focused) ControlPaint.DrawFocusRectangle(e.Graphics, Rectangle.Inflate(ClientRectangle, -5, -5), Palette.Back, background.Color);
         }
-
-        private static Pen CreateRingPen(float width)
+        protected override void Dispose(bool disposing)
         {
-            return new Pen(Palette.Lime, width) { StartCap = LineCap.Round, EndCap = LineCap.Round };
-        }
-
-        private void DrawCentered(Graphics g, string text, Font font, Brush brush, float y)
-        {
-            SizeF size = g.MeasureString(text, font);
-            g.DrawString(text, font, brush, (ClientSize.Width - size.Width) / 2f, y);
+            if (disposing) background.Dispose();
+            base.Dispose(disposing);
         }
     }
 
@@ -2592,8 +2610,10 @@ namespace GameBoostPro
         public ToggleSwitch()
         {
             Size = new Size(48, 26);
+            BackColor = Palette.Back;
             Cursor = Cursors.Hand;
             TabStop = true;
+            AccessibleRole = AccessibleRole.CheckButton;
             DoubleBuffered = true;
         }
 
@@ -2605,8 +2625,10 @@ namespace GameBoostPro
         }
         protected override void OnPaint(PaintEventArgs e)
         {
+            GraphicsState state = e.Graphics.Save();
+            e.Graphics.ScaleTransform(Width / 48f, Height / 26f);
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            Color track = value ? Palette.Lime : Palette.Line;
+            Color track = Enabled && value ? Palette.Lime : Palette.Line;
             using (SolidBrush brush = new SolidBrush(track))
             {
                 e.Graphics.FillEllipse(brush, 0, 0, 26, 26);
@@ -2616,12 +2638,14 @@ namespace GameBoostPro
             int x = value ? 25 : 3;
             using (SolidBrush knob = new SolidBrush(value ? Palette.Back : Palette.Text))
                 e.Graphics.FillEllipse(knob, x, 3, 20, 20);
+            if (Focused) ControlPaint.DrawFocusRectangle(e.Graphics, new Rectangle(1, 1, 46, 24), Palette.Text, track);
+            e.Graphics.Restore(state);
         }
     }
 
     internal sealed class MetricBar : Control
     {
-        private float value;
+        private float value = Single.NaN;
         private readonly Font labelFont;
         private readonly Font numberFont;
         private readonly SolidBrush mutedBrush;
@@ -2634,8 +2658,8 @@ namespace GameBoostPro
             get { return value; }
             set
             {
-                float next = Math.Max(0, Math.Min(100, value));
-                if (Math.Abs(next - this.value) < 0.25f) return;
+                float next = Single.IsNaN(value) || Single.IsInfinity(value) ? Single.NaN : Math.Max(0, Math.Min(100, value));
+                if ((Single.IsNaN(next) && Single.IsNaN(this.value)) || Math.Abs(next - this.value) < 0.25f) return;
                 this.value = next;
                 Invalidate();
             }
@@ -2644,9 +2668,10 @@ namespace GameBoostPro
         public MetricBar()
         {
             Size = new Size(180, 48);
+            BackColor = Palette.Back;
             Caption = "";
             DoubleBuffered = true;
-            labelFont = new Font("Segoe UI", 8);
+            labelFont = new Font("Leelawadee UI", 9);
             numberFont = new Font("Segoe UI Semibold", 10, FontStyle.Bold);
             mutedBrush = new SolidBrush(Palette.Muted);
             textBrush = new SolidBrush(Palette.Text);
@@ -2670,13 +2695,20 @@ namespace GameBoostPro
 
         protected override void OnPaint(PaintEventArgs e)
         {
+            GraphicsState state = e.Graphics.Save();
+            float scale = Font.SizeInPoints / 10f;
+            e.Graphics.ScaleTransform(scale, scale);
+            float drawingWidth = Width / scale;
             e.Graphics.DrawString(Caption, labelFont, mutedBrush, 0, 1);
-            string numberText = Math.Round(value).ToString(CultureInfo.InvariantCulture) + "%";
+            string numberText = Single.IsNaN(value) ? "--" : Math.Round(value).ToString(CultureInfo.InvariantCulture) + "%";
             SizeF size = e.Graphics.MeasureString(numberText, numberFont);
-            e.Graphics.DrawString(numberText, numberFont, textBrush, Width - size.Width, 0);
-            e.Graphics.FillRectangle(trackBrush, 0, 30, Width, 4);
-            fillBrush.Color = value > 85 ? Palette.Coral : Palette.Lime;
-            e.Graphics.FillRectangle(fillBrush, 0, 30, (int)(Width * value / 100f), 4);
+            e.Graphics.DrawString(numberText, numberFont, textBrush, drawingWidth - size.Width, 0);
+            float barY = Math.Max(30, size.Height + 8);
+            e.Graphics.FillRectangle(trackBrush, 0, barY, drawingWidth, 4);
+            fillBrush.Color = Caption == "RAM" && value >= 90 ? Palette.Amber :
+                Caption == "GPU 3D" ? Palette.Cyan : Palette.Lime;
+            if (!Single.IsNaN(value)) e.Graphics.FillRectangle(fillBrush, 0, barY, (int)(drawingWidth * value / 100f), 4);
+            e.Graphics.Restore(state);
         }
     }
 
@@ -2696,113 +2728,61 @@ namespace GameBoostPro
         public GameLibraryForm(List<GameInstall> installedGames, string selectedName)
         {
             catalog = new List<GameInstall>(installedGames ?? new List<GameInstall>());
-            Text = "Game Library";
-            StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(860, 560);
-            FormBorderStyle = FormBorderStyle.FixedSingle;
-            MaximizeBox = false;
-            MinimizeBox = false;
-            BackColor = Palette.Back;
-            ForeColor = Palette.Text;
-            Font = new Font("Segoe UI", 9);
-
-            Label title = new Label
-            {
-                Text = "GAME LIBRARY",
-                Location = new Point(24, 20),
-                Size = new Size(320, 28),
-                Font = new Font("Segoe UI", 15, FontStyle.Bold),
-                ForeColor = Palette.Text
-            };
-            Controls.Add(title);
-            Controls.Add(new Label
-            {
-                Text = "ค้นหา เลือกโปรไฟล์ หรือเปิดเกมได้จากหน้าจอนี้",
-                Location = new Point(25, 52),
-                Size = new Size(540, 22),
-                ForeColor = Palette.Muted
-            });
-
-            Controls.Add(CreateLabel("SEARCH", 24, 84, 100, Palette.Muted));
-            searchBox = new TextBox
-            {
-                Location = new Point(24, 105),
-                Size = new Size(610, 32),
-                BackColor = Palette.Surface,
-                ForeColor = Palette.Text,
-                BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Segoe UI", 10)
-            };
-            searchBox.TextChanged += delegate { RefreshItems(null); };
-            Controls.Add(searchBox);
-
-            Controls.Add(CreateLabel("SOURCE", 654, 84, 100, Palette.Muted));
-            sourceFilter = new ComboBox
-            {
-                Location = new Point(654, 104),
-                Size = new Size(180, 32),
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                BackColor = Palette.Surface,
-                ForeColor = Palette.Text,
-                FlatStyle = FlatStyle.Flat
-            };
+            WorkspaceLayout.Form(this, UiText.T("คลังเกม", "Game library"), new Size(860, 620), new Size(640, 480));
+            TableLayoutPanel layout = WorkspaceLayout.Grid(1, 44, 28, 72, -1, 30, 96);
+            layout.Padding = new Padding(20, 12, 20, 12);
+            layout.Controls.Add(WorkspaceLayout.Label(UiText.T("คลังเกม", "Game library"), 20, Palette.Text), 0, 0);
+            layout.Controls.Add(WorkspaceLayout.Label(UiText.T("Steam / Epic / Riot / เกมที่เพิ่มเอง", "Steam / Epic / Riot / Manual games"), 10, Palette.Muted), 0, 1);
+            TableLayoutPanel filters = WorkspaceLayout.Grid(2, 28, -1);
+            filters.ColumnStyles[0].Width = 70; filters.ColumnStyles[1].Width = 30;
+            filters.Controls.Add(WorkspaceLayout.Label(UiText.T("ค้นหาเกม", "Search games"), 10, Palette.Text), 0, 0);
+            filters.Controls.Add(WorkspaceLayout.Label(UiText.T("แหล่งที่มา", "Source"), 10, Palette.Text), 1, 0);
+            searchBox = new TextBox { Dock = DockStyle.Fill, BackColor = Palette.SurfaceHigh, ForeColor = Palette.Text,
+                BorderStyle = BorderStyle.FixedSingle, Font = Font, Margin = new Padding(0, 4, 12, 6) };
+            sourceFilter = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList,
+                BackColor = Palette.Surface, ForeColor = Palette.Text, FlatStyle = FlatStyle.Flat, Margin = new Padding(0, 4, 0, 6) };
             sourceFilter.Items.AddRange(new object[] { "ALL", "STEAM", "EPIC", "RIOT", "MANUAL" });
+            searchBox.TextChanged += delegate { RefreshItems(null); };
             sourceFilter.SelectedIndexChanged += delegate { RefreshItems(null); };
-            Controls.Add(sourceFilter);
-
-            games = new ListView
+            filters.Controls.Add(searchBox, 0, 1); filters.Controls.Add(sourceFilter, 1, 1);
+            layout.Controls.Add(filters, 0, 2);
+            games = new ListView { Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, MultiSelect = false,
+                HideSelection = false, BackColor = Palette.Surface, ForeColor = Palette.Text, BorderStyle = BorderStyle.None };
+            games.Columns.Add(UiText.T("เกม", "Game"), 250);
+            games.Columns.Add(UiText.T("แหล่งที่มา", "Source"), 95);
+            games.Columns.Add(UiText.T("สถานะ", "Status"), 110);
+            games.Columns.Add(UiText.T("ตำแหน่งติดตั้ง", "Install location"), 330);
+            games.SizeChanged += delegate
             {
-                Location = new Point(24, 154),
-                Size = new Size(810, 300),
-                View = View.Details,
-                FullRowSelect = true,
-                MultiSelect = false,
-                HideSelection = false,
-                BackColor = Palette.Surface,
-                ForeColor = Palette.Text,
-                BorderStyle = BorderStyle.FixedSingle
+                if (games.ClientSize.Width < 100) return;
+                int width = games.ClientSize.Width - SystemInformation.VerticalScrollBarWidth;
+                games.Columns[0].Width = Math.Max(160, width * 32 / 100);
+                games.Columns[1].Width = Math.Max(70, width * 13 / 100);
+                games.Columns[2].Width = Math.Max(90, width * 17 / 100);
+                games.Columns[3].Width = Math.Max(160, width - games.Columns[0].Width - games.Columns[1].Width - games.Columns[2].Width);
             };
-            games.Columns.Add("GAME", 250);
-            games.Columns.Add("SOURCE", 85);
-            games.Columns.Add("STATUS", 92);
-            games.Columns.Add("INSTALL LOCATION", 360);
-            catalog.Sort(delegate(GameInstall left, GameInstall right)
-            {
-                return StringComparer.CurrentCultureIgnoreCase.Compare(left.DisplayName, right.DisplayName);
-            });
+            catalog.Sort(delegate(GameInstall left, GameInstall right) { return StringComparer.CurrentCultureIgnoreCase.Compare(left.DisplayName, right.DisplayName); });
             games.SelectedIndexChanged += delegate { UpdateActions(); };
-            games.DoubleClick += delegate
-            {
-                if (CanLaunch(GetSelected())) UseSelection(true);
-                else UseSelection(false);
-            };
-            Controls.Add(games);
-
-            countLabel = CreateLabel("", 24, 464, 360, Palette.Muted);
-            Controls.Add(countLabel);
-
-            Button add = CreateButton("ADD EXE", 24, 500, 112, Palette.SurfaceHigh, Palette.Text);
+            games.DoubleClick += delegate { UseSelection(CanLaunch(GetSelected())); };
+            layout.Controls.Add(games, 0, 3);
+            countLabel = WorkspaceLayout.Label("", 9, Palette.Muted);
+            layout.Controls.Add(countLabel, 0, 4);
+            TableLayoutPanel actions = WorkspaceLayout.Grid(3, 48, 48);
+            Button add = WorkspaceLayout.Button(UiText.T("เพิ่มไฟล์เกม", "Add game"), Palette.Text);
             add.Click += AddManualGame;
-            Controls.Add(add);
-            folderButton = CreateButton("OPEN FOLDER", 146, 500, 130, Palette.SurfaceHigh, Palette.Text);
-            folderButton.Enabled = false;
-            folderButton.Click += OpenSelectedFolder;
-            Controls.Add(folderButton);
-
-            Button cancel = CreateButton("ยกเลิก", 487, 500, 100, Palette.SurfaceHigh, Palette.Text);
+            folderButton = WorkspaceLayout.Button(UiText.T("เปิดโฟลเดอร์", "Open folder"), Palette.Text);
+            folderButton.Enabled = false; folderButton.Click += OpenSelectedFolder;
+            Button cancel = WorkspaceLayout.Button(UiText.T("ยกเลิก", "Cancel"), Palette.Text);
             cancel.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
-            Controls.Add(cancel);
-            launchButton = CreateButton("PLAY NOW", 596, 500, 112, Palette.SurfaceHigh, Palette.Lime);
-            launchButton.Enabled = false;
-            launchButton.Click += delegate { UseSelection(true); };
-            Controls.Add(launchButton);
-            useButton = CreateButton("USE PROFILE", 718, 500, 116, Palette.Lime, Palette.Back);
-            useButton.Enabled = false;
-            useButton.Click += delegate { UseSelection(false); };
-            Controls.Add(useButton);
-
-            AcceptButton = useButton;
-            CancelButton = cancel;
+            launchButton = WorkspaceLayout.Button(UiText.T("เปิดเกม", "Launch"), Palette.Lime);
+            launchButton.Enabled = false; launchButton.Click += delegate { UseSelection(true); };
+            useButton = WorkspaceLayout.Button(UiText.T("เลือกเกมนี้", "Select game"), Palette.Lime);
+            useButton.Enabled = false; useButton.Click += delegate { UseSelection(false); };
+            actions.Controls.Add(add, 0, 0); actions.Controls.Add(folderButton, 1, 0);
+            actions.Controls.Add(cancel, 0, 1); actions.Controls.Add(launchButton, 1, 1); actions.Controls.Add(useButton, 2, 1);
+            layout.Controls.Add(actions, 0, 5);
+            Controls.Add(layout);
+            AcceptButton = useButton; CancelButton = cancel;
             sourceFilter.SelectedIndex = 0;
             RefreshItems(null);
             SelectByName(selectedName);
@@ -2822,7 +2802,7 @@ namespace GameBoostPro
                     game.DirectoryPath.IndexOf(query, StringComparison.CurrentCultureIgnoreCase) < 0) continue;
                 ListViewItem item = new ListViewItem(game.DisplayName);
                 item.SubItems.Add(game.Source);
-                item.SubItems.Add(CanLaunch(game) ? "READY" : "LAUNCHER");
+                item.SubItems.Add(CanLaunch(game) ? UiText.T("พร้อมเปิด", "Ready") : UiText.T("ใช้ Launcher", "Use launcher"));
                 item.SubItems.Add(game.DirectoryPath);
                 item.Tag = game;
                 games.Items.Add(item);
@@ -2830,7 +2810,7 @@ namespace GameBoostPro
                     StringComparison.OrdinalIgnoreCase)) item.Selected = true;
             }
             games.EndUpdate();
-            countLabel.Text = games.Items.Count + " OF " + catalog.Count + " GAMES";
+            countLabel.Text = games.Items.Count + UiText.T(" จาก ", " of ") + catalog.Count + UiText.T(" เกม", " games");
             UpdateActions();
         }
 
@@ -2854,8 +2834,8 @@ namespace GameBoostPro
         {
             using (OpenFileDialog dialog = new OpenFileDialog())
             {
-                dialog.Title = "เพิ่มไฟล์เกมใน Library";
-                dialog.Filter = "ไฟล์เกม (*.exe)|*.exe";
+                dialog.Title = UiText.T("เพิ่มไฟล์เกมใน Library", "Add game to library");
+                dialog.Filter = UiText.T("ไฟล์เกม (*.exe)|*.exe", "Game executable (*.exe)|*.exe");
                 dialog.CheckFileExists = true;
                 if (dialog.ShowDialog(this) != DialogResult.OK) return;
                 GameInstall added = new GameInstall
@@ -2922,32 +2902,6 @@ namespace GameBoostPro
                 File.Exists(game.LaunchTarget);
         }
 
-        private static Label CreateLabel(string text, int x, int y, int width, Color color)
-        {
-            return new Label
-            {
-                Text = text, Location = new Point(x, y), Size = new Size(width, 20),
-                ForeColor = color, BackColor = Color.Transparent,
-                Font = new Font("Segoe UI", 8, FontStyle.Bold)
-            };
-        }
-
-        private static Button CreateButton(string text, int x, int y, int width, Color back, Color fore)
-        {
-            Button button = new Button
-            {
-                Text = text,
-                Location = new Point(x, y),
-                Size = new Size(width, 34),
-                BackColor = back,
-                ForeColor = fore,
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI", 9, FontStyle.Bold),
-                Cursor = Cursors.Hand
-            };
-            button.FlatAppearance.BorderSize = 0;
-            return button;
-        }
     }
 
     internal sealed class AdvancedSettingsForm : Form
@@ -2962,71 +2916,59 @@ namespace GameBoostPro
         private readonly ComboBox powerPlan;
         private readonly Label powerPlanDetail;
 
+        private readonly TableLayoutPanel settingsPage;
+
         public AdvancedSettingsForm(AppConfig source)
         {
             config = source;
-            Text = "Advanced Mode";
-            StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(650, 582);
-            FormBorderStyle = FormBorderStyle.FixedSingle;
-            MaximizeBox = false;
-            MinimizeBox = false;
-            BackColor = Palette.Back;
-            ForeColor = Palette.Text;
-            Font = new Font("Segoe UI", 9);
-
-            Controls.Add(CreateLabel("ADVANCED MODE", 26, 20, 300, 32, 16, FontStyle.Bold, Palette.Text));
-            Controls.Add(CreateLabel("เลือกเฉพาะค่าที่เหมาะกับเครื่อง ค่าใหม่จะใช้ใน Boost รอบถัดไป", 27, 55, 560, 22,
-                9, FontStyle.Regular, Palette.Muted));
-
-            Panel power = new Panel { Location = new Point(26, 91), Size = new Size(598, 78), BackColor = Palette.SurfaceHigh };
-            power.Controls.Add(CreateLabel("POWER PLAN", 14, 8, 130, 18, 8, FontStyle.Bold, Palette.Amber));
-            powerPlan = new ComboBox
-            {
-                Location = new Point(392, 13),
-                Size = new Size(190, 30),
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                DrawMode = DrawMode.OwnerDrawFixed,
-                ItemHeight = 22,
-                FlatStyle = FlatStyle.Flat,
-                BackColor = Palette.Back,
-                ForeColor = Palette.Text,
-                Font = new Font("Segoe UI", 9, FontStyle.Bold)
-            };
-            powerPlan.Items.AddRange(new object[] { "SMART (แนะนำ)", "ULTIMATE", "KEEP CURRENT" });
+            WorkspaceLayout.Form(this, UiText.T("ตั้งค่าขั้นสูง", "Advanced"), new Size(760, 730), new Size(640, 500));
+            settingsPage = WorkspaceLayout.ScrollPage(this, 720);
+            settingsPage.RowCount = 11; settingsPage.RowStyles.Clear();
+            foreach (int height in new[] { 48, 40, 110, 68, 68, 68, 68, 68, 68, 64 })
+                settingsPage.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+            settingsPage.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            settingsPage.Controls.Add(WorkspaceLayout.Label(UiText.T("ตั้งค่าขั้นสูง", "Advanced"), 20, Palette.Text), 0, 0);
+            settingsPage.Controls.Add(WorkspaceLayout.Label(UiText.T("ค่าที่อนุญาตให้โปรไฟล์ใช้ / มีผลรอบถัดไป", "Allowed settings for profiles / Next session"), 10, Palette.Cyan), 0, 1);
+            TableLayoutPanel power = WorkspaceLayout.Grid(2, 48, -1);
+            power.ColumnStyles[0].Width = 60; power.ColumnStyles[1].Width = 40;
+            power.Controls.Add(WorkspaceLayout.Label("Power plan", 12, Palette.Amber), 0, 0);
+            powerPlan = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList,
+                DrawMode = DrawMode.OwnerDrawFixed, ItemHeight = 24, FlatStyle = FlatStyle.Flat,
+                BackColor = Palette.Surface, ForeColor = Palette.Text, Font = Font, Margin = new Padding(6, 8, 0, 6) };
+            powerPlan.Items.AddRange(new object[] { UiText.T("SMART (แนะนำ)", "SMART (recommended)"), "ULTIMATE", "KEEP CURRENT" });
             string powerMode = PowerPlanPolicy.Normalize(source.PowerPlanMode);
             powerPlan.SelectedIndex = String.Equals(powerMode, PowerPlanPolicy.Ultimate, StringComparison.Ordinal) ? 1 :
                 String.Equals(powerMode, PowerPlanPolicy.KeepCurrent, StringComparison.Ordinal) ? 2 : 0;
-            powerPlanDetail = CreateLabel("", 14, 31, 365, 38, 8, FontStyle.Regular, Palette.Muted);
-            powerPlanDetail.AutoEllipsis = true;
-            power.Controls.Add(powerPlanDetail);
-            power.Controls.Add(powerPlan);
+            powerPlanDetail = WorkspaceLayout.Label("", 10, Palette.Muted);
+            power.Controls.Add(powerPlan, 1, 0); power.Controls.Add(powerPlanDetail, 0, 1);
+            power.SetColumnSpan(powerPlanDetail, 2);
             powerPlan.SelectedIndexChanged += delegate { UpdatePowerPlanDetail(); };
             powerPlan.DrawItem += DrawPowerPlanItem;
-            Controls.Add(power);
+            settingsPage.Controls.Add(power, 0, 2);
             UpdatePowerPlanDetail();
 
-            int y = 186;
-            gameMode = AddSetting("Windows Game Mode", "ให้ Windows จัดลำดับทรัพยากรสำหรับเกม", y, source.EnableWindowsGameMode);
-            capture = AddSetting("Disable background capture", "หยุด Game DVR และการอัดหน้าจอเบื้องหลัง", y += 52, source.DisableBackgroundCapture);
-            gpu = AddSetting("High-performance GPU", "กำหนด GPU ประสิทธิภาพสูงให้ไฟล์เกม", y += 52, source.PreferHighPerformanceGpu);
-            priority = AddSetting("AboveNormal priority", "เพิ่มลำดับ CPU โดยไม่ใช้ High หรือ Realtime", y += 52, source.UseAboveNormalPriority);
-            highQos = AddSetting("Disable power throttling", "กัน Windows ลดความเร็วเฉพาะโปรเซสเกม", y += 52, source.UseHighQos);
-            priorityBoost = AddSetting("Dynamic priority boost", "เปิดกลไกตอบสนองระยะสั้นของ Windows", y += 52, source.UseDynamicPriorityBoost);
-
-            Button reset = CreateButton("RESET BEST", 26, 532, 122, Palette.SurfaceHigh, Palette.Text);
+            gameMode = AddSetting("Windows Game Mode", UiText.T("ให้ Windows จัดลำดับทรัพยากรสำหรับเกม", "Allow Windows Game Mode"), 3, source.EnableWindowsGameMode);
+            capture = AddSetting("Background capture", UiText.T("หยุดการอัดหน้าจอเบื้องหลังระหว่าง Boost", "Pause Windows background recording during Boost"), 4, source.DisableBackgroundCapture);
+            gpu = AddSetting("High-performance GPU", UiText.T("กำหนด GPU ประสิทธิภาพสูงให้ไฟล์เกม", "Prefer the high-performance GPU for the game executable"), 5, source.PreferHighPerformanceGpu);
+            priority = AddSetting("AboveNormal priority", UiText.T("เพิ่มลำดับ CPU โดยไม่ใช้ High หรือ Realtime", "Use AboveNormal, never High or Realtime"), 6, source.UseAboveNormalPriority);
+            highQos = AddSetting("Disable power throttling", UiText.T("กัน Windows ลดความเร็วเฉพาะโปรเซสเกม", "Disable Windows power throttling for the game process"), 7, source.UseHighQos);
+            priorityBoost = AddSetting("Dynamic priority boost", UiText.T("เปิดกลไกตอบสนองระยะสั้นของ Windows", "Allow Windows dynamic priority boosts"), 8, source.UseDynamicPriorityBoost);
+            TableLayoutPanel footer = WorkspaceLayout.Grid(3, -1);
+            Button reset = WorkspaceLayout.Button(UiText.T("ค่าเริ่มต้น", "Defaults"), Palette.Text);
             reset.Click += delegate
             {
                 gameMode.Value = capture.Value = gpu.Value = priority.Value = highQos.Value = priorityBoost.Value = true;
                 powerPlan.SelectedIndex = 0;
             };
-            Controls.Add(reset);
-            Button cancel = CreateButton("ยกเลิก", 408, 532, 96, Palette.SurfaceHigh, Palette.Text);
+            Button cancel = WorkspaceLayout.Button(UiText.T("ยกเลิก", "Cancel"), Palette.Text);
             cancel.Click += delegate { DialogResult = DialogResult.Cancel; Close(); };
-            Controls.Add(cancel);
-            Button save = CreateButton("SAVE", 514, 532, 110, Palette.Lime, Palette.Back);
+            Button save = WorkspaceLayout.Button(UiText.T("บันทึก", "Save"), Palette.Lime);
             save.Click += delegate
             {
+                bool oldMode = config.EnableWindowsGameMode, oldCapture = config.DisableBackgroundCapture,
+                    oldGpu = config.PreferHighPerformanceGpu, oldPriority = config.UseAboveNormalPriority,
+                    oldQos = config.UseHighQos, oldDynamic = config.UseDynamicPriorityBoost;
+                string oldPower = config.PowerPlanMode;
                 config.EnableWindowsGameMode = gameMode.Value;
                 config.DisableBackgroundCapture = capture.Value;
                 config.PreferHighPerformanceGpu = gpu.Value;
@@ -3035,29 +2977,36 @@ namespace GameBoostPro
                 config.UseDynamicPriorityBoost = priorityBoost.Value;
                 config.PowerPlanMode = powerPlan.SelectedIndex == 1 ? PowerPlanPolicy.Ultimate :
                     powerPlan.SelectedIndex == 2 ? PowerPlanPolicy.KeepCurrent : PowerPlanPolicy.Smart;
-                config.Version = 5;
-                Storage.SaveConfig(config);
-                DialogResult = DialogResult.OK;
-                Close();
+                config.Version = 6;
+                try { Storage.SaveConfig(config); DialogResult = DialogResult.OK; Close(); }
+                catch (Exception ex)
+                {
+                    config.EnableWindowsGameMode = oldMode; config.DisableBackgroundCapture = oldCapture;
+                    config.PreferHighPerformanceGpu = oldGpu; config.UseAboveNormalPriority = oldPriority;
+                    config.UseHighQos = oldQos; config.UseDynamicPriorityBoost = oldDynamic;
+                    config.PowerPlanMode = oldPower;
+                    MessageBox.Show(this, ex.Message, "Game Boost Pro", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
             };
-            Controls.Add(save);
+            footer.Controls.Add(reset, 0, 0); footer.Controls.Add(cancel, 1, 0); footer.Controls.Add(save, 2, 0);
+            settingsPage.Controls.Add(footer, 0, 9);
         }
 
         private void UpdatePowerPlanDetail()
         {
             if (powerPlan.SelectedIndex == 1)
             {
-                powerPlanDetail.Text = "บังคับ Ultimate Performance และสร้างให้อัตโนมัติถ้ายังไม่มี";
+                powerPlanDetail.Text = UiText.T("ใช้กับ Performance บน Desktop เท่านั้น / Laptop คงแผนเดิม", "Desktop Performance only; laptops keep their plan");
                 powerPlanDetail.ForeColor = Palette.Amber;
             }
             else if (powerPlan.SelectedIndex == 2)
             {
-                powerPlanDetail.Text = "ไม่สลับแผนพลังงาน ปรับเฉพาะ Windows และโปรเซสเกม";
+                powerPlanDetail.Text = UiText.T("ไม่สลับแผนพลังงาน ปรับเฉพาะ Windows และโปรเซสเกม", "Keep the current plan; change only allowed Windows and process settings");
                 powerPlanDetail.ForeColor = Palette.Muted;
             }
             else
             {
-                powerPlanDetail.Text = "Acer เก็บแผนเดิม เช่น Nezha / Desktop ใช้ Ultimate";
+                powerPlanDetail.Text = UiText.T("Acer เก็บแผนเดิม เช่น Nezha / Desktop ใช้ Ultimate", "Performance: Acer keeps its plan / Desktop uses Ultimate");
                 powerPlanDetail.ForeColor = Palette.Lime;
             }
         }
@@ -3074,36 +3023,21 @@ namespace GameBoostPro
             e.DrawFocusRectangle();
         }
 
-        private ToggleSwitch AddSetting(string title, string detail, int y, bool value)
+        private ToggleSwitch AddSetting(string title, string detail, int row, bool value)
         {
-            Controls.Add(CreateLabel(title, 28, y, 300, 22, 10, FontStyle.Bold, Palette.Text));
-            Controls.Add(CreateLabel(detail, 28, y + 23, 490, 20, 8, FontStyle.Regular, Palette.Muted));
-            ToggleSwitch toggle = new ToggleSwitch { Location = new Point(566, y + 8), Value = value };
-            Controls.Add(toggle);
+            TableLayoutPanel line = WorkspaceLayout.Grid(2, -1);
+            line.ColumnStyles[0].SizeType = SizeType.Percent; line.ColumnStyles[0].Width = 100;
+            line.ColumnStyles[1].SizeType = SizeType.Absolute; line.ColumnStyles[1].Width = 66;
+            TableLayoutPanel identity = WorkspaceLayout.Grid(1, 28, -1);
+            identity.Controls.Add(WorkspaceLayout.Label(title, 11, Palette.Text), 0, 0);
+            identity.Controls.Add(WorkspaceLayout.Label(detail, 9, Palette.Muted), 0, 1);
+            ToggleSwitch toggle = new ToggleSwitch { Anchor = AnchorStyles.Right, Margin = new Padding(0, 0, 12, 0), Value = value,
+                AccessibleName = title };
+            line.Controls.Add(identity, 0, 0); line.Controls.Add(toggle, 1, 0);
+            settingsPage.Controls.Add(line, 0, row);
             return toggle;
         }
 
-        private static Label CreateLabel(string text, int x, int y, int width, int height, float size,
-            FontStyle style, Color color)
-        {
-            return new Label
-            {
-                Text = text, Location = new Point(x, y), Size = new Size(width, height),
-                Font = new Font("Segoe UI", size, style), ForeColor = color, BackColor = Color.Transparent
-            };
-        }
-
-        private static Button CreateButton(string text, int x, int y, int width, Color back, Color fore)
-        {
-            Button button = new Button
-            {
-                Text = text, Location = new Point(x, y), Size = new Size(width, 34), BackColor = back,
-                ForeColor = fore, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9, FontStyle.Bold),
-                Cursor = Cursors.Hand
-            };
-            button.FlatAppearance.BorderSize = 0;
-            return button;
-        }
     }
 
     internal sealed class GraphicsAdvisorForm : Form
@@ -3117,9 +3051,6 @@ namespace GameBoostPro
         private readonly string selectedGameName;
         private readonly string selectedGamePath;
         private readonly string selectedGameDirectory;
-        private readonly int selectedProcessId;
-        private readonly string selectedProcessName;
-        private readonly long selectedProcessStartTimeUtcTicks;
         private readonly Label gameLabel;
         private readonly Label systemLabel;
         private readonly Label appLabel;
@@ -3132,117 +3063,180 @@ namespace GameBoostPro
         private readonly Button refreshButton;
         private bool loading;
 
-        public GraphicsAdvisorForm(string gameName, string gamePath, string gameDirectory,
-            int processId, string processName, long processStartTimeUtcTicks)
+        private readonly AppConfig settings;
+        private readonly CheckBox preferGpu, pauseCapture;
+        private readonly Label saveStatus, nvidiaStatus, panelStatus;
+        private readonly Button saveButton, nvidiaButton, panelButton;
+        private GraphicsDestinations destinations;
+
+        public GraphicsAdvisorForm(string gameName, string gamePath, string gameDirectory, AppConfig config)
         {
+            settings = config;
             selectedGameName = gameName ?? "";
             selectedGamePath = gamePath ?? "";
             selectedGameDirectory = gameDirectory ?? "";
-            selectedProcessId = processId;
-            selectedProcessName = processName ?? "";
-            selectedProcessStartTimeUtcTicks = processStartTimeUtcTicks;
-            Text = "Graphics Advisor";
-            StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(780, 690);
-            FormBorderStyle = FormBorderStyle.FixedSingle;
-            MaximizeBox = false;
-            MinimizeBox = false;
-            BackColor = Palette.Back;
-            ForeColor = Palette.Text;
-            Font = new Font("Segoe UI", 9);
-
-            Controls.Add(CreateLabel("GRAPHICS ADVISOR", 26, 20, 360, 32, 16, FontStyle.Bold, Palette.Text));
-            Label readOnly = CreateLabel("READ ONLY", 646, 22, 108, 28, 8, FontStyle.Bold, Palette.Back);
-            readOnly.BackColor = Palette.Cyan;
-            readOnly.TextAlign = ContentAlignment.MiddleCenter;
-            Controls.Add(readOnly);
-            gameLabel = CreateLabel("กำลังตรวจสอบเกม...", 27, 57, 700, 23, 9, FontStyle.Bold, Palette.Muted);
-            gameLabel.AutoEllipsis = true;
-            Controls.Add(gameLabel);
-
-            Panel systemBand = new Panel
+            WorkspaceLayout.Form(this, UiText.T("กราฟิก", "Graphics"), new Size(860, 720), new Size(640, 500));
+            TableLayoutPanel root = WorkspaceLayout.Grid(1, 48, 34, -1, 54);
+            root.Padding = new Padding(20, 12, 20, 8);
+            root.Controls.Add(WorkspaceLayout.Label(UiText.T("กราฟิก", "Graphics"), 20, Palette.Text), 0, 0);
+            gameLabel = WorkspaceLayout.Label(selectedGameName, 10, Palette.Cyan);
+            root.Controls.Add(gameLabel, 0, 1);
+            WorkspaceTabs tabs = new WorkspaceTabs();
+            Panel settingsTab = tabs.AddPage(UiText.T("ตั้งค่า", "Settings"));
+            Panel capabilitiesTab = tabs.AddPage(UiText.T("ความเข้ากันได้ของ GPU", "GPU compatibility"));
+            root.Controls.Add(tabs, 0, 2);
+            TableLayoutPanel page = WorkspaceLayout.ScrollPage(settingsTab, 450);
+            page.RowCount = 9; page.RowStyles.Clear();
+            foreach (int height in new[] { 32, 38, 38, 54, 42, 74, 74, 74 })
+                page.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+            page.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            page.Controls.Add(WorkspaceLayout.Label(UiText.T("กติกา Boost / ทุกเกม", "Boost rules / All games"), 12, Palette.Cyan), 0, 0);
+            preferGpu = new CheckBox { Dock = DockStyle.Fill, Checked = config.PreferHighPerformanceGpu,
+                Text = UiText.T("เลือก High-performance GPU เมื่อ Boost", "Prefer the high-performance GPU during Boost"), ForeColor = Palette.Text };
+            pauseCapture = new CheckBox { Dock = DockStyle.Fill, Checked = config.DisableBackgroundCapture,
+                Text = UiText.T("หยุด Background Capture เมื่อ Boost", "Pause background capture during Boost"), ForeColor = Palette.Text };
+            page.Controls.Add(preferGpu, 0, 1); page.Controls.Add(pauseCapture, 0, 2);
+            TableLayoutPanel saveRow = WorkspaceLayout.Grid(2, -1);
+            saveRow.ColumnStyles[0].Width = 72; saveRow.ColumnStyles[1].Width = 28;
+            saveStatus = WorkspaceLayout.Label(UiText.T("ใช้ตามระดับ Boost / มีผลรอบถัดไป", "Applied by Boost level / Next session"), 9, Palette.Muted);
+            saveButton = WorkspaceLayout.Button(UiText.T("บันทึก", "Save"), Palette.Lime);
+            saveButton.Enabled = false;
+            saveButton.Click += delegate { SaveSettings(); };
+            EventHandler settingsChanged = delegate
             {
-                Location = new Point(24, 92), Size = new Size(732, 76), BackColor = Palette.SurfaceHigh
+                saveButton.Enabled = preferGpu.Checked != settings.PreferHighPerformanceGpu ||
+                    pauseCapture.Checked != settings.DisableBackgroundCapture;
+                saveStatus.Text = saveButton.Enabled ? UiText.T("ยังไม่ได้บันทึก", "Unsaved changes") :
+                    UiText.T("ไม่มีการเปลี่ยนแปลง", "No changes");
+                saveStatus.ForeColor = saveButton.Enabled ? Palette.Amber : Palette.Muted;
             };
-            systemLabel = CreateLabel("กำลังอ่าน GPU และเส้นทางจอ", 16, 10, 480, 54, 9,
-                FontStyle.Bold, Palette.Text);
-            appLabel = CreateLabel("NVIDIA APP  กำลังตรวจสอบ", 500, 10, 216, 54, 8,
-                FontStyle.Bold, Palette.Muted);
-            appLabel.TextAlign = ContentAlignment.MiddleRight;
-            systemBand.Controls.Add(systemLabel);
-            systemBand.Controls.Add(appLabel);
-            Controls.Add(systemBand);
-
-            Panel summaryBand = new Panel
+            preferGpu.CheckedChanged += settingsChanged;
+            pauseCapture.CheckedChanged += settingsChanged;
+            saveRow.Controls.Add(saveStatus, 0, 0); saveRow.Controls.Add(saveButton, 1, 0);
+            page.Controls.Add(saveRow, 0, 3);
+            page.Controls.Add(WorkspaceLayout.Label(UiText.T("การตั้งค่า Windows และ Driver", "Windows and driver settings"), 12, Palette.Text), 0, 4);
+            Label windowsStatus;
+            Button windows = DestinationRow(page, 5, "Windows Graphics",
+                UiText.T("เลือก GPU และการตั้งค่าจอ", "GPU preference and display settings"), out windowsStatus);
+            windows.Text = UiText.T("เปิดตั้งค่า", "Open settings");
+            windows.Click += delegate { GraphicsDestinations.Open(this, "ms-settings:display-advancedgraphics"); };
+            nvidiaButton = DestinationRow(page, 6, "NVIDIA App", UiText.T("กำลังค้นหา...", "Checking..."), out nvidiaStatus);
+            panelButton = DestinationRow(page, 7, "NVIDIA Control Panel", UiText.T("กำลังค้นหา...", "Checking..."), out panelStatus);
+            nvidiaButton.Enabled = panelButton.Enabled = false;
+            nvidiaButton.Click += delegate
             {
-                Location = new Point(24, 181), Size = new Size(732, 70), BackColor = Palette.Surface
+                if (destinations == null) return;
+                if (destinations.NvidiaApp != null) GraphicsDestinations.Open(this, destinations.NvidiaApp);
+                else GraphicsDestinations.Open(this, GraphicsDestinations.NvidiaDownload);
             };
-            summaryBand.Controls.Add(CreateLabel("BEST ROUTE", 16, 10, 110, 18, 8,
-                FontStyle.Bold, Palette.Amber));
-            summaryLabel = CreateLabel("กำลังสร้างคำแนะนำที่เหมาะกับเครื่องนี้", 16, 30, 700, 32, 9,
-                FontStyle.Bold, Palette.Text);
-            summaryLabel.AutoEllipsis = true;
-            summaryBand.Controls.Add(summaryLabel);
-            Controls.Add(summaryBand);
-
-            dlssRow = CreateAdvisorRow("DLSS SUPER RESOLUTION", 269);
-            frameGenerationRow = CreateAdvisorRow("FRAME GENERATION", 331);
-            nisRow = CreateAdvisorRow("NVIDIA IMAGE SCALING", 393);
-            reflexRow = CreateAdvisorRow("NVIDIA REFLEX", 455);
-            smoothMotionRow = CreateAdvisorRow("SMOOTH MOTION", 517);
-
-            Panel footer = new Panel
+            panelButton.Click += delegate
             {
-                Location = new Point(0, 610), Size = new Size(780, 80), BackColor = Palette.Surface
+                if (destinations == null) return;
+                if (destinations.ControlPanel != null) GraphicsDestinations.Open(this, destinations.ControlPanel);
+                else GraphicsDestinations.Open(this, GraphicsDestinations.ControlPanelStore);
             };
-            Button windowsGraphics = CreateButton("WINDOWS GRAPHICS", 24, 22, 166, Palette.SurfaceHigh, Palette.Text);
-            windowsGraphics.Click += delegate { OpenTarget("ms-settings:display-advancedgraphics"); };
-            Button nvidiaPanel = CreateButton("NVIDIA PANEL", 200, 22, 142, Palette.SurfaceHigh, Palette.Text);
-            nvidiaPanel.Click += delegate { OpenTarget("nvcplui.exe"); };
-            Button frameTest = CreateButton("FRAME TEST", 352, 22, 164, Palette.SurfaceHigh, Palette.Amber);
-            frameTest.Click += OpenFrameTest;
-            refreshButton = CreateButton("REFRESH", 526, 22, 100, Palette.SurfaceHigh, Palette.Cyan);
+
+            TableLayoutPanel compatibility = WorkspaceLayout.ScrollPage(capabilitiesTab, 720);
+            compatibility.RowCount = 10; compatibility.RowStyles.Clear();
+            foreach (int height in new[] { 56, 30, 64, 38, 100, 100, 100, 100, 100 })
+                compatibility.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+            compatibility.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+            systemLabel = WorkspaceLayout.Label(UiText.T("กำลังอ่าน GPU...", "Reading GPU..."), 10, Palette.Text);
+            appLabel = WorkspaceLayout.Label("", 9, Palette.Muted);
+            summaryLabel = WorkspaceLayout.Label("", 10, Palette.Amber);
+            compatibility.Controls.Add(systemLabel, 0, 0); compatibility.Controls.Add(appLabel, 0, 1);
+            compatibility.Controls.Add(summaryLabel, 0, 2);
+            compatibility.Controls.Add(WorkspaceLayout.Label(UiText.T("รองรับที่ Hardware ไม่ได้แปลว่าเปิดใช้อยู่", "Hardware support does not confirm an active setting"), 9, Palette.Muted), 0, 3);
+            dlssRow = CreateAdvisorRow(compatibility, "DLSS SUPER RESOLUTION", UiText.T("ตั้งค่าในเกม", "Set in game"), 4);
+            frameGenerationRow = CreateAdvisorRow(compatibility, "FRAME GENERATION", UiText.T("ตั้งค่าในเกม", "Set in game"), 5);
+            nisRow = CreateAdvisorRow(compatibility, "NVIDIA IMAGE SCALING", "NVIDIA / Display", 6);
+            reflexRow = CreateAdvisorRow(compatibility, "NVIDIA REFLEX", UiText.T("ตั้งค่าในเกม", "Set in game"), 7);
+            smoothMotionRow = CreateAdvisorRow(compatibility, "SMOOTH MOTION", "NVIDIA App / Graphics", 8);
+
+            TableLayoutPanel footer = WorkspaceLayout.Grid(3, -1);
+            footer.ColumnStyles[0].Width = 50; footer.ColumnStyles[1].Width = 25; footer.ColumnStyles[2].Width = 25;
+            footer.Controls.Add(WorkspaceLayout.Label(UiText.T("DLSS / Reflex / Frame Gen: ตั้งค่าในเกม", "DLSS / Reflex / Frame Gen: in-game settings"), 9, Palette.Muted), 0, 0);
+            refreshButton = WorkspaceLayout.Button(UiText.T("ตรวจอีกครั้ง", "Check again"), Palette.Cyan);
             refreshButton.Click += delegate { RefreshAdvisor(); };
-            Button close = CreateButton("DONE", 636, 22, 120, Palette.Lime, Palette.Back);
+            Button close = WorkspaceLayout.Button(UiText.T("ปิด", "Close"), Palette.Text);
             close.Click += delegate { Close(); };
-            footer.Controls.Add(windowsGraphics);
-            footer.Controls.Add(nvidiaPanel);
-            footer.Controls.Add(frameTest);
-            footer.Controls.Add(refreshButton);
-            footer.Controls.Add(close);
-            Controls.Add(footer);
-
-            Shown += delegate { RefreshAdvisor(); };
+            footer.Controls.Add(refreshButton, 1, 0); footer.Controls.Add(close, 2, 0);
+            root.Controls.Add(footer, 0, 3);
+            Controls.Add(root);
+            Shown += delegate { if (Storage.UsesProtectedStateStore) RefreshAdvisor(); };
+            FormClosing += delegate(object sender, FormClosingEventArgs e)
+            {
+                if (saveButton.Enabled && MessageBox.Show(this,
+                    UiText.T("ละทิ้งค่าที่ยังไม่ได้บันทึกหรือไม่?", "Discard unsaved changes?"), "Game Boost Pro",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes)
+                    e.Cancel = true;
+            };
         }
 
-        private void OpenFrameTest(object sender, EventArgs e)
+        private Button DestinationRow(TableLayoutPanel page, int row, string title, string detail, out Label status)
         {
-            if (selectedProcessId <= 0 || String.IsNullOrWhiteSpace(selectedProcessName) ||
-                selectedProcessStartTimeUtcTicks <= 0)
-            {
-                MessageBox.Show(this, "กรุณาเปิดเกมให้ระบบตรวจพบก่อนเริ่ม Frame Test", "Game Boost Pro",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
-                return;
-            }
-            using (FrameBenchmarkForm dialog = new FrameBenchmarkForm(selectedGameName, selectedProcessId,
-                selectedProcessName, selectedProcessStartTimeUtcTicks))
-                dialog.ShowDialog(this);
+            TableLayoutPanel line = WorkspaceLayout.Grid(2, -1);
+            line.ColumnStyles[0].Width = 68; line.ColumnStyles[1].Width = 32;
+            line.Margin = new Padding(0, 4, 0, 4);
+            TableLayoutPanel identity = WorkspaceLayout.Grid(1, 30, -1);
+            identity.Controls.Add(WorkspaceLayout.Label(title, 11, Palette.Text), 0, 0);
+            status = WorkspaceLayout.Label(detail, 9, Palette.Muted);
+            identity.Controls.Add(status, 0, 1);
+            Button open = WorkspaceLayout.Button(UiText.T("กำลังค้นหา", "Checking"), Palette.Cyan);
+            line.Controls.Add(identity, 0, 0); line.Controls.Add(open, 1, 0);
+            page.Controls.Add(line, 0, row);
+            return open;
         }
 
-        private AdvisorRow CreateAdvisorRow(string title, int y)
+        private AdvisorRow CreateAdvisorRow(TableLayoutPanel page, string title, string destination, int index)
         {
-            Label heading = CreateLabel(title, 28, y, 190, 22, 9, FontStyle.Bold, Palette.Text);
-            Label detail = CreateLabel("รอตรวจสอบ", 222, y, 384, 42, 8, FontStyle.Regular, Palette.Muted);
-            Label status = CreateLabel("CHECKING", 610, y, 142, 24, 8, FontStyle.Bold, Palette.Muted);
-            status.TextAlign = ContentAlignment.TopRight;
-            Controls.Add(heading);
-            Controls.Add(detail);
-            Controls.Add(status);
-            Controls.Add(new Panel
-            {
-                BackColor = Palette.Line, Location = new Point(28, y + 48), Size = new Size(724, 1)
-            });
+            TableLayoutPanel row = WorkspaceLayout.Grid(2, 28, 28, -1);
+            row.ColumnStyles[0].Width = 58; row.ColumnStyles[1].Width = 42;
+            row.Controls.Add(WorkspaceLayout.Label(title, 10, Palette.Text), 0, 0);
+            Label status = WorkspaceLayout.Label("CHECKING", 9, Palette.Muted);
+            status.TextAlign = ContentAlignment.MiddleRight;
+            row.Controls.Add(status, 1, 0);
+            row.Controls.Add(WorkspaceLayout.Label(destination, 9, Palette.Cyan), 0, 1);
+            row.SetColumnSpan(row.GetControlFromPosition(0, 1), 2);
+            Label detail = WorkspaceLayout.Label(UiText.T("รอตรวจสอบ", "Pending"), 9, Palette.Muted);
+            row.Controls.Add(detail, 0, 2); row.SetColumnSpan(detail, 2);
+            page.Controls.Add(row, 0, index);
             return new AdvisorRow { Detail = detail, Status = status };
+        }
+
+        private void SaveSettings()
+        {
+            bool previousGpu = settings.PreferHighPerformanceGpu, previousCapture = settings.DisableBackgroundCapture;
+            try
+            {
+                settings.PreferHighPerformanceGpu = preferGpu.Checked;
+                settings.DisableBackgroundCapture = pauseCapture.Checked;
+                Storage.SaveConfig(settings);
+                saveButton.Enabled = false;
+                saveStatus.Text = UiText.T("บันทึกแล้ว / ใช้ตามระดับ Boost รอบถัดไป", "Saved / Applied by level next session");
+                saveStatus.ForeColor = Palette.Cyan;
+            }
+            catch (Exception ex)
+            {
+                settings.PreferHighPerformanceGpu = previousGpu;
+                settings.DisableBackgroundCapture = previousCapture;
+                saveStatus.Text = UiText.T("บันทึกไม่สำเร็จ: ", "Could not save: ") + ex.Message;
+                saveStatus.ForeColor = Palette.Coral;
+            }
+        }
+
+        private void ApplyDestinations(GraphicsDestinations found)
+        {
+            destinations = found;
+            nvidiaButton.Enabled = panelButton.Enabled = true;
+            nvidiaButton.Text = found.NvidiaApp != null ? UiText.T("เปิด NVIDIA App", "Open NVIDIA App") : UiText.T("ดาวน์โหลด", "Download");
+            panelButton.Text = found.ControlPanel != null ? UiText.T("เปิด Control Panel", "Open Control Panel") : UiText.T("ดูใน Store", "View in Store");
+            nvidiaStatus.Text = found.NvidiaApp != null ? UiText.T("ติดตั้งแล้ว / Graphics และ Driver", "Installed / Graphics and drivers") : UiText.T("ยังไม่พบแอปบนเครื่อง", "App not found on this PC");
+            panelStatus.Text = found.ControlPanel != null ? (found.ControlPanel.IsStoreApp ? "Microsoft Store" : "Desktop app") :
+                found.NvidiaApp != null ? UiText.T("ยังไม่พบ / ใช้ NVIDIA App ที่มีอยู่ได้", "Not found / NVIDIA App is available separately") :
+                UiText.T("ยังไม่พบ Control Panel บนเครื่อง", "Control Panel not found on this PC");
+            nvidiaStatus.ForeColor = found.NvidiaApp != null ? Palette.Cyan : Palette.Amber;
+            panelStatus.ForeColor = found.ControlPanel != null ? Palette.Cyan : Palette.Amber;
         }
 
         private void RefreshAdvisor()
@@ -3250,9 +3244,11 @@ namespace GameBoostPro
             if (loading) return;
             loading = true;
             refreshButton.Enabled = false;
-            refreshButton.Text = "CHECKING";
+            refreshButton.Text = UiText.T("กำลังตรวจสอบ", "Checking");
+            GraphicsDestinations found = null;
             Task.Factory.StartNew<GraphicsAdvisorSnapshot>(delegate
             {
+                found = GraphicsDestinations.Discover();
                 return GraphicsAdvisor.Inspect(selectedGameName, selectedGamePath, selectedGameDirectory);
             }).ContinueWith(delegate(Task<GraphicsAdvisorSnapshot> task)
             {
@@ -3263,9 +3259,15 @@ namespace GameBoostPro
                     {
                         loading = false;
                         refreshButton.Enabled = true;
-                        refreshButton.Text = "REFRESH";
+                        refreshButton.Text = UiText.T("ตรวจอีกครั้ง", "Check again");
+                        if (found != null) ApplyDestinations(found);
+                        else
+                        {
+                            nvidiaStatus.Text = panelStatus.Text = UiText.T("ตรวจไม่สำเร็จ / ตรวจอีกครั้งได้", "Discovery failed / Check again");
+                            nvidiaStatus.ForeColor = panelStatus.ForeColor = Palette.Coral;
+                        }
                         if (task.Status == TaskStatus.RanToCompletion) ApplySnapshot(task.Result);
-                        else summaryLabel.Text = "อ่านข้อมูลกราฟิกไม่สำเร็จ กรุณาลองใหม่";
+                        else summaryLabel.Text = UiText.T("อ่านข้อมูลกราฟิกไม่สำเร็จ กรุณาลองใหม่", "Cannot read graphics data. Try again");
                     }));
                 }
                 catch { loading = false; }
@@ -3275,9 +3277,7 @@ namespace GameBoostPro
         private void ApplySnapshot(GraphicsAdvisorSnapshot snapshot)
         {
             GraphicsCapabilities gpu = snapshot.Capabilities;
-            gameLabel.Text = "GAME  " + snapshot.GameName +
-                (String.IsNullOrWhiteSpace(snapshot.GamePath) ? " / runtime settings ยังไม่ยืนยัน" :
-                " / " + Path.GetFileName(snapshot.GamePath));
+            gameLabel.Text = UiText.T("เกมที่เลือก: ", "Selected game: ") + snapshot.GameName;
             string routeText = snapshot.DisplayRoute == "Active" ? "NVIDIA SCAN-OUT ACTIVE" :
                 snapshot.DisplayRoute == "Inactive" ? "NVIDIA SCAN-OUT INACTIVE" : "SCAN-OUT UNKNOWN";
             systemLabel.Text = gpu.GpuName + "\nDRIVER " + snapshot.DriverVersion + "  /  " + routeText;
@@ -3287,53 +3287,53 @@ namespace GameBoostPro
             appLabel.ForeColor = snapshot.HasNvidiaApp ? Palette.Cyan : Palette.Muted;
 
             if (snapshot.IsCompetitiveGame)
-                summaryLabel.Text = "Competitive: ใช้ native resolution + Reflex ก่อน และไม่ใช้ Frame Generation";
+                summaryLabel.Text = UiText.T("Competitive: ใช้ native resolution + Reflex ก่อน และไม่ใช้ Frame Generation", "Competitive: start with native resolution + Reflex; avoid Frame Generation");
             else if (gpu.SupportsDlssSuperResolution)
-                summaryLabel.Text = "ใช้ DLSS ในเกมก่อน; Frame Generation ใช้เมื่อ base FPS ดีและเกมรองรับ";
+                summaryLabel.Text = UiText.T("ใช้ DLSS ในเกมก่อน; Frame Generation ใช้เมื่อ base FPS ดีและเกมรองรับ", "Prefer in-game DLSS; use Frame Generation with good base FPS and game support");
             else
-                summaryLabel.Text = "รักษาค่า native ก่อน แล้ววัด FPS/ความนิ่งจากในเกมก่อนเปลี่ยน scaler";
+                summaryLabel.Text = UiText.T("รักษาค่า native ก่อน แล้ววัด FPS/ความนิ่งจากในเกมก่อนเปลี่ยน scaler", "Keep native settings first; measure FPS and stability before switching scalers");
 
             if (gpu.SupportsDlssSuperResolution)
                 SetRow(dlssRow, "CAPABLE", snapshot.HasDlssLibraryHint
-                    ? "พบไฟล์ที่เกี่ยวข้องใกล้เกม แต่ต้องยืนยันสถานะในเมนูเกม"
-                    : "RTX รองรับ ต้องตรวจว่าตัวเกมมีเมนู DLSS หรือไม่", Palette.Cyan);
+                    ? UiText.T("พบไฟล์ที่เกี่ยวข้องใกล้เกม แต่ต้องยืนยันสถานะในเมนูเกม", "Related files found near the game; confirm settings in its menu")
+                    : UiText.T("RTX รองรับ ต้องตรวจว่าตัวเกมมีเมนู DLSS หรือไม่", "RTX is supported; check whether the game offers DLSS"), Palette.Cyan);
             else
-                SetRow(dlssRow, "NOT AVAILABLE", "GPU ที่ตรวจพบไม่ใช่ RTX; โปรแกรมจะไม่อ้างว่าเปิด DLSS ได้", Palette.Muted);
+                SetRow(dlssRow, "NOT AVAILABLE", UiText.T("GPU ที่ตรวจพบไม่ใช่ RTX; โปรแกรมจะไม่อ้างว่าเปิด DLSS ได้", "No RTX GPU detected; DLSS cannot be claimed as available"), Palette.Muted);
 
             if (gpu.SupportsFrameGeneration)
                 SetRow(frameGenerationRow, snapshot.IsCompetitiveGame ? "SKIP FOR COMP" : "CAPABLE",
                     snapshot.HasFrameGenerationLibraryHint
-                        ? "พบไฟล์ Frame Generation; ยังต้องเปิดและยืนยันในเกม"
-                        : "RTX 40/50 รองรับเมื่อเกมรองรับ; RTX 40 ไม่มี Multi Frame Generation",
+                        ? UiText.T("พบไฟล์ Frame Generation; ยังต้องเปิดและยืนยันในเกม", "Frame Generation files found; enable and verify in the game")
+                        : UiText.T("RTX 40/50 รองรับเมื่อเกมรองรับ; RTX 40 ไม่มี Multi Frame Generation", "Supported RTX 40/50 games only; RTX 40 has no Multi Frame Generation"),
                     snapshot.IsCompetitiveGame ? Palette.Amber : Palette.Cyan);
             else
-                SetRow(frameGenerationRow, "NOT AVAILABLE", "ไม่มี hardware path สำหรับ DLSS Frame Generation", Palette.Muted);
+                SetRow(frameGenerationRow, "NOT AVAILABLE", UiText.T("ไม่มี hardware path สำหรับ DLSS Frame Generation", "No hardware path for DLSS Frame Generation"), Palette.Muted);
 
             if (snapshot.NisEligibility == "Eligible")
-                SetRow(nisRow, "ELIGIBLE", "ต้องใช้ fullscreen ที่เหมาะสม + resolution ต่ำกว่า native และดู NIS indicator สีเขียว",
+                SetRow(nisRow, "ELIGIBLE", UiText.T("ต้องใช้ fullscreen ที่เหมาะสม + resolution ต่ำกว่า native และดู NIS indicator สีเขียว", "Use compatible fullscreen, below-native resolution and a green NIS indicator"),
                     Palette.Lime);
             else if (snapshot.NisEligibility == "RouteBlocked")
-                SetRow(nisRow, "ROUTE NOT READY", "RTX ไม่ได้รายงานว่าขับจออยู่; NIS driver scaling จึงไม่น่าใช้ได้บนจอนี้",
+                SetRow(nisRow, "ROUTE NOT READY", UiText.T("RTX ไม่ได้รายงานว่าขับจออยู่; NIS driver scaling จึงไม่น่าใช้ได้บนจอนี้", "RTX is not reported as driving this display; driver NIS is unlikely to work here"),
                     Palette.Coral);
             else if (snapshot.NisEligibility == "Unavailable")
-                SetRow(nisRow, "NOT AVAILABLE", "ไม่พบ NVIDIA GPU สำหรับ driver NIS", Palette.Muted);
+                SetRow(nisRow, "NOT AVAILABLE", UiText.T("ไม่พบ NVIDIA GPU สำหรับ driver NIS", "No NVIDIA GPU detected for driver NIS"), Palette.Muted);
             else
-                SetRow(nisRow, "UNVERIFIED", "ตรวจเส้นทางจอไม่ได้ จึงจะไม่เปิด NIS ให้อัตโนมัติ", Palette.Amber);
+                SetRow(nisRow, "UNVERIFIED", UiText.T("ตรวจเส้นทางจอไม่ได้ จึงจะไม่เปิด NIS ให้อัตโนมัติ", "Unknown display route; NIS will not be enabled automatically"), Palette.Amber);
 
             SetRow(reflexRow, gpu.IsNvidia ? "CHECK IN GAME" : "GAME DEPENDENT",
                 snapshot.IsCompetitiveGame
-                    ? "ถ้าเกมมี Reflex ให้ใช้ฟังก์ชันในเกมก่อน และหลีกเลี่ยง Frame Generation"
-                    : "Reflex เป็นฟังก์ชันในตัวเกม โปรแกรมภายนอกยืนยันว่าเปิดอยู่ไม่ได้",
+                    ? UiText.T("ถ้าเกมมี Reflex ให้ใช้ฟังก์ชันในเกมก่อน และหลีกเลี่ยง Frame Generation", "Prefer in-game Reflex where available; avoid Frame Generation in competitive games")
+                    : UiText.T("Reflex เป็นฟังก์ชันในตัวเกม โปรแกรมภายนอกยืนยันว่าเปิดอยู่ไม่ได้", "Reflex is an in-game feature; an external app cannot verify its active state"),
                 gpu.IsNvidia ? Palette.Cyan : Palette.Muted);
 
             if (!gpu.SupportsSmoothMotion)
-                SetRow(smoothMotionRow, "NOT AVAILABLE", "ต้องใช้ RTX 40 Series ขึ้นไป", Palette.Muted);
+                SetRow(smoothMotionRow, "NOT AVAILABLE", UiText.T("ต้องใช้ RTX 40 Series ขึ้นไป", "Requires RTX 40 Series or newer"), Palette.Muted);
             else if (snapshot.IsCompetitiveGame)
-                SetRow(smoothMotionRow, "SKIP FOR COMP", "เพิ่มเฟรมที่สร้างขึ้น เหมาะกับเกมภาพมากกว่าเกมแข่งขัน", Palette.Amber);
+                SetRow(smoothMotionRow, "SKIP FOR COMP", UiText.T("เพิ่มเฟรมที่สร้างขึ้น เหมาะกับเกมภาพมากกว่าเกมแข่งขัน", "Generated frames suit visual games more than competitive play"), Palette.Amber);
             else if (!snapshot.HasNvidiaApp)
-                SetRow(smoothMotionRow, "APP REQUIRED", "รองรับที่ GPU แต่ควรติดตั้ง/อัปเดต NVIDIA App ก่อน", Palette.Amber);
+                SetRow(smoothMotionRow, "APP REQUIRED", UiText.T("รองรับที่ GPU แต่ควรติดตั้ง/อัปเดต NVIDIA App ก่อน", "GPU supported; install or update NVIDIA App first"), Palette.Amber);
             else
-                SetRow(smoothMotionRow, "AVAILABLE", "ใช้เมื่อเกมไม่มี native Frame Generation และอย่าเปิดซ้อนกัน", Palette.Cyan);
+                SetRow(smoothMotionRow, "AVAILABLE", UiText.T("ใช้เมื่อเกมไม่มี native Frame Generation และอย่าเปิดซ้อนกัน", "Use only without native Frame Generation; do not stack them"), Palette.Cyan);
         }
 
         private static void SetRow(AdvisorRow row, string status, string detail, Color color)
@@ -3343,37 +3343,6 @@ namespace GameBoostPro
             row.Detail.Text = detail;
         }
 
-        private void OpenTarget(string target)
-        {
-            try { Process.Start(new ProcessStartInfo(target) { UseShellExecute = true }); }
-            catch (Exception ex)
-            {
-                MessageBox.Show(this, "เปิดไม่สำเร็จ: " + ex.Message, "Game Boost Pro",
-                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
-        }
-
-        private static Label CreateLabel(string text, int x, int y, int width, int height, float size,
-            FontStyle style, Color color)
-        {
-            return new Label
-            {
-                Text = text, Location = new Point(x, y), Size = new Size(width, height),
-                Font = new Font("Segoe UI", size, style), ForeColor = color, BackColor = Color.Transparent
-            };
-        }
-
-        private static Button CreateButton(string text, int x, int y, int width, Color back, Color fore)
-        {
-            Button button = new Button
-            {
-                Text = text, Location = new Point(x, y), Size = new Size(width, 36), BackColor = back,
-                ForeColor = fore, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8, FontStyle.Bold),
-                Cursor = Cursors.Hand
-            };
-            button.FlatAppearance.BorderSize = 0;
-            return button;
-        }
     }
 
     internal sealed class FrameBenchmarkForm : Form
@@ -3386,133 +3355,118 @@ namespace GameBoostPro
             public Button Capture { get; set; }
         }
 
-        private readonly string gameName;
-        private readonly int gameProcessId;
-        private readonly string gameProcessName;
-        private readonly long gameProcessStartTimeUtcTicks;
-        private readonly string historyKey;
-        private readonly BenchmarkPane baselinePane;
-        private readonly BenchmarkPane boostedPane;
-        private readonly Label currentMode;
-        private readonly Label comparisonTitle;
-        private readonly Label comparisonDetail;
+        private string gameName, gameProcessName, historyKey;
+        private int gameProcessId;
+        private long gameProcessStartTimeUtcTicks;
+        private readonly BenchmarkPane baselinePane, boostedPane;
+        private readonly Label currentMode, comparisonTitle, comparisonDetail, targetLabel, prerequisites;
         private readonly Timer countdown;
+        private readonly bool captureToolReady;
+        private bool lastBoosted;
         private DateTime captureStarted;
         private bool capturing;
+        public bool IsCapturing { get { return capturing; } }
 
         public FrameBenchmarkForm(string selectedGameName, int processId, string processName,
             long processStartTimeUtcTicks)
         {
-            gameName = String.IsNullOrWhiteSpace(selectedGameName) ? processName : selectedGameName;
-            gameProcessId = processId;
-            gameProcessName = processName;
-            gameProcessStartTimeUtcTicks = processStartTimeUtcTicks;
-            historyKey = processName + "|" + gameName + "|" +
-                processStartTimeUtcTicks.ToString(CultureInfo.InvariantCulture);
-            Text = "Frame Lab";
-            StartPosition = FormStartPosition.CenterParent;
-            ClientSize = new Size(720, 540);
-            FormBorderStyle = FormBorderStyle.FixedSingle;
-            MaximizeBox = false;
-            MinimizeBox = true;
-            BackColor = Palette.Back;
-            ForeColor = Palette.Text;
-            Font = new Font("Segoe UI", 9);
-
-            Controls.Add(CreateLabel("FRAME LAB", 24, 20, 260, 32, 16, FontStyle.Bold, Palette.Text));
-            Label badge = CreateLabel("15 SECOND CAPTURE", 548, 22, 148, 28, 8, FontStyle.Bold, Palette.Back);
-            badge.BackColor = Palette.Amber;
-            badge.TextAlign = ContentAlignment.MiddleCenter;
-            Controls.Add(badge);
-            Controls.Add(CreateLabel(gameName, 25, 58, 470, 22, 9, FontStyle.Bold, Palette.Cyan));
-            currentMode = CreateLabel("", 510, 58, 186, 22, 8, FontStyle.Bold, Palette.Muted);
-            currentMode.TextAlign = ContentAlignment.MiddleRight;
-            Controls.Add(currentMode);
-            Controls.Add(CreateLabel("วัด app-present frame time ในฉากเดิม ผลหนึ่งรอบเป็นสัญญาณ ควรทำซ้ำก่อนเก็บค่า",
-                25, 87, 665, 24, 8, FontStyle.Regular, Palette.Muted));
-
-            baselinePane = CreatePane("BASELINE / NORMAL", 24, Palette.Muted);
-            boostedPane = CreatePane("BOOSTED / GAME MODE", 368, Palette.Lime);
+            WorkspaceLayout.Form(this, UiText.T("วัดเฟรม / Frame Lab", "Frame Lab"), new Size(820, 670), new Size(640, 500));
+            TableLayoutPanel page = WorkspaceLayout.ScrollPage(this, 634);
+            page.RowCount = 8; page.RowStyles.Clear();
+            foreach (int height in new[] { 48, 36, 34, 62, 244, 40, 82, 64 })
+                page.RowStyles.Add(new RowStyle(SizeType.Absolute, height));
+            page.RowStyles[6].SizeType = SizeType.Percent;
+            page.RowStyles[6].Height = 100;
+            page.Controls.Add(WorkspaceLayout.Label(UiText.T("วัดเฟรม / Frame Lab", "Frame Lab"), 20, Palette.Text), 0, 0);
+            targetLabel = WorkspaceLayout.Label("", 11, Palette.Cyan);
+            page.Controls.Add(targetLabel, 0, 1);
+            currentMode = WorkspaceLayout.Label("", 10, Palette.Lime);
+            page.Controls.Add(currentMode, 0, 2);
+            prerequisites = WorkspaceLayout.Label("", 10, Palette.Amber);
+            page.Controls.Add(prerequisites, 0, 3);
+            TableLayoutPanel panes = WorkspaceLayout.Grid(2, -1);
+            baselinePane = CreatePane(panes, UiText.T("1. ก่อน Boost / Baseline", "1. Before Boost / Baseline"), 0, Palette.Cyan);
+            boostedPane = CreatePane(panes, UiText.T("2. หลัง Boost / Boosted", "2. With Boost / Boosted"), 1, Palette.Lime);
             baselinePane.Capture.Click += delegate { StartCapture("Baseline"); };
             boostedPane.Capture.Click += delegate { StartCapture("Boosted"); };
-
-            Panel comparison = new Panel
+            page.Controls.Add(panes, 0, 4);
+            comparisonTitle = WorkspaceLayout.Label("", 11, Palette.Amber);
+            comparisonDetail = WorkspaceLayout.Label("", 10, Palette.Muted);
+            page.Controls.Add(comparisonTitle, 0, 5); page.Controls.Add(comparisonDetail, 0, 6);
+            TableLayoutPanel footer = WorkspaceLayout.Grid(2, -1);
+            footer.ColumnStyles[0].Width = 65; footer.ColumnStyles[1].Width = 35;
+            footer.Controls.Add(WorkspaceLayout.Label(UiText.T("App-present frame time / 15 วินาทีต่อรอบ\nPresentMon ทำงานเฉพาะขณะวัด", "App-present frame time / 15 seconds per run\nPresentMon runs only during capture"), 9, Palette.Muted), 0, 0);
+            Button dashboard = WorkspaceLayout.Button(UiText.T("กลับหน้า Boost", "Back to Boost"), Palette.Text);
+            dashboard.Click += delegate
             {
-                Location = new Point(24, 374), Size = new Size(672, 82), BackColor = Palette.SurfaceHigh
+                if (capturing) return;
+                if (Owner != null) { Owner.WindowState = FormWindowState.Normal; Owner.Show(); Owner.Activate(); Hide(); }
+                else Close();
             };
-            comparisonTitle = CreateLabel("WAITING FOR A/B", 16, 12, 220, 22, 9, FontStyle.Bold, Palette.Amber);
-            comparisonDetail = CreateLabel("เก็บ Baseline ตอนโหมดปกติ และ Boosted ตอน Game Mode เปิด",
-                16, 37, 635, 34, 8, FontStyle.Regular, Palette.Muted);
-            comparison.Controls.Add(comparisonTitle);
-            comparison.Controls.Add(comparisonDetail);
-            Controls.Add(comparison);
-
-            Panel footer = new Panel
-            {
-                Location = new Point(0, 478), Size = new Size(720, 62), BackColor = Palette.Surface
-            };
-            Label privacy = CreateLabel("PresentMon ทำงานเฉพาะช่วงที่กดวัด แล้วลบ CSV ชั่วคราวทันที",
-                24, 20, 470, 22, 8, FontStyle.Regular, Palette.Muted);
-            Button close = CreateButton("DONE", 576, 13, 120, Palette.Lime, Palette.Back);
-            close.Click += delegate { if (!capturing) Close(); };
-            footer.Controls.Add(privacy);
-            footer.Controls.Add(close);
-            Controls.Add(footer);
-
+            footer.Controls.Add(dashboard, 1, 0); page.Controls.Add(footer, 0, 7);
             countdown = new Timer { Interval = 250 };
             countdown.Tick += UpdateCountdown;
             FormClosing += delegate(object sender, FormClosingEventArgs e)
             {
                 if (!capturing) return;
                 e.Cancel = true;
-                MessageBox.Show(this, "กรุณารอให้ Frame Test รอบนี้เสร็จก่อนปิดหน้าต่าง", "Game Boost Pro",
-                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                prerequisites.Text = UiText.T("รอให้รอบวัดเสร็จก่อนปิด", "Wait for this capture to finish before closing");
             };
             FormClosed += delegate { countdown.Stop(); countdown.Dispose(); };
+            captureToolReady = PresentMonRunner.IsToolReady();
+            SetTarget(selectedGameName, processId, processName, processStartTimeUtcTicks);
+        }
+
+        public void SetTarget(string display, int id, string name, long processStartTimeUtcTicks)
+        {
+            if (capturing) return;
+            bool changed = id != gameProcessId || processStartTimeUtcTicks != gameProcessStartTimeUtcTicks || historyKey == null;
+            if (!changed && lastBoosted == Storage.HasState()) return;
+            gameName = String.IsNullOrWhiteSpace(display) ? name ?? "" : display;
+            gameProcessId = id; gameProcessName = name ?? ""; gameProcessStartTimeUtcTicks = processStartTimeUtcTicks;
+            historyKey = gameProcessName + "|" + gameName + "|" + processStartTimeUtcTicks.ToString(CultureInfo.InvariantCulture);
             RenderHistory();
         }
 
-        private BenchmarkPane CreatePane(string title, int x, Color accent)
+        private BenchmarkPane CreatePane(TableLayoutPanel parent, string title, int column, Color accent)
         {
-            Panel panel = new Panel
-            {
-                Location = new Point(x, 126), Size = new Size(328, 228), BackColor = Palette.Surface
-            };
-            panel.Controls.Add(CreateLabel(title, 16, 14, 250, 22, 9, FontStyle.Bold, accent));
-            Label fps = CreateLabel("NOT CAPTURED", 16, 52, 296, 42, 19, FontStyle.Bold, Palette.Text);
-            Label detail = CreateLabel("Average FPS  --\n1% Low  --    P95 frame  --",
-                16, 100, 296, 48, 9, FontStyle.Regular, Palette.Muted);
-            Label mode = CreateLabel("Present mode  --", 16, 151, 296, 20, 8, FontStyle.Regular, Palette.Muted);
+            TableLayoutPanel pane = WorkspaceLayout.Grid(1, 34, 52, 54, 32, 50);
+            pane.BackColor = Palette.Surface;
+            pane.Padding = new Padding(12, 6, 12, 6);
+            pane.Margin = new Padding(column == 0 ? 0 : 8, 4, column == 0 ? 8 : 0, 4);
+            pane.Controls.Add(WorkspaceLayout.Label(title, 11, accent), 0, 0);
+            Label fps = WorkspaceLayout.Label("", 20, Palette.Text);
+            Label detail = WorkspaceLayout.Label("", 10, Palette.Muted);
+            Label mode = WorkspaceLayout.Label("", 9, Palette.Muted);
             mode.AutoEllipsis = true;
-            Button capture = CreateButton("CAPTURE", 16, 184, 296, Palette.SurfaceHigh, accent);
-            panel.Controls.Add(fps);
-            panel.Controls.Add(detail);
-            panel.Controls.Add(mode);
-            panel.Controls.Add(capture);
-            Controls.Add(panel);
+            Button capture = WorkspaceLayout.Button("", accent);
+            pane.Controls.Add(fps, 0, 1); pane.Controls.Add(detail, 0, 2);
+            pane.Controls.Add(mode, 0, 3); pane.Controls.Add(capture, 0, 4);
+            parent.Controls.Add(pane, column, 0);
             return new BenchmarkPane { Fps = fps, Detail = detail, Mode = mode, Capture = capture };
         }
 
         private void StartCapture(string slot)
         {
             if (capturing) return;
+            if (!HasLiveTarget()) { RenderHistory(); return; }
             string boostSession = GetBoostSessionToken();
             bool boosted = !String.Equals(boostSession, "NORMAL", StringComparison.Ordinal);
             if (String.Equals(slot, "Baseline", StringComparison.Ordinal) && boosted)
             {
-                MessageBox.Show(this, "กด RESTORE ก่อนเก็บ Baseline", "Game Boost Pro",
+                MessageBox.Show(this, UiText.T("กด RESTORE ก่อนเก็บ Baseline", "Restore before recording Baseline"), "Game Boost Pro",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
             if (String.Equals(slot, "Boosted", StringComparison.Ordinal) && !boosted)
             {
-                MessageBox.Show(this, "เปิด Game Mode ก่อนเก็บ Boosted", "Game Boost Pro",
+                MessageBox.Show(this, UiText.T("เปิด Game Mode ก่อนเก็บ Boosted", "Enable Game Mode before recording Boosted"), "Game Boost Pro",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
             if (!PresentMonRunner.IsToolReady())
             {
-                MessageBox.Show(this, "Frame Test component ไม่ครบหรือไม่ผ่านการตรวจ hash กรุณาติดตั้งใหม่",
+                MessageBox.Show(this, UiText.T("Frame Test component ไม่ครบหรือไม่ผ่านการตรวจ hash กรุณาติดตั้งใหม่", "Frame Test component is missing or failed hash verification. Reinstall the app"),
                     "Game Boost Pro", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
@@ -3521,7 +3475,7 @@ namespace GameBoostPro
             captureStarted = DateTime.UtcNow;
             baselinePane.Capture.Enabled = false;
             boostedPane.Capture.Enabled = false;
-            currentMode.Text = "CAPTURING / กลับเข้าเกม";
+            currentMode.Text = UiText.T("CAPTURING / กลับเข้าเกม", "CAPTURING / Return to game");
             currentMode.ForeColor = Palette.Amber;
             countdown.Start();
             FocusGameWindow();
@@ -3531,7 +3485,7 @@ namespace GameBoostPro
                 FrameBenchmarkResult result = PresentMonRunner.Capture(gameProcessId, gameProcessName,
                     gameProcessStartTimeUtcTicks, slot, gameName);
                 if (!String.Equals(GetBoostSessionToken(), boostSession, StringComparison.Ordinal))
-                    throw new InvalidOperationException("โหมด Boost เปลี่ยนระหว่างทดสอบ ผลรอบนี้จึงไม่ถูกเก็บ");
+                    throw new InvalidOperationException(UiText.T("โหมด Boost เปลี่ยนระหว่างทดสอบ ผลรอบนี้จึงไม่ถูกเก็บ", "Boost state changed during capture. This result was discarded"));
                 return result;
             }).ContinueWith(delegate(Task<FrameBenchmarkResult> task)
             {
@@ -3548,7 +3502,7 @@ namespace GameBoostPro
                         if (task.Status == TaskStatus.RanToCompletion)
                             FrameBenchmarkStore.Save(historyKey, task.Result);
                         else
-                            MessageBox.Show(this, task.Exception == null ? "Frame Test ไม่สำเร็จ" :
+                            MessageBox.Show(this, task.Exception == null ? UiText.T("Frame Test ไม่สำเร็จ", "Frame Test failed") :
                                 task.Exception.GetBaseException().Message, "Game Boost Pro",
                                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
                         RenderHistory();
@@ -3581,21 +3535,38 @@ namespace GameBoostPro
             currentMode.Text = "CAPTURING  " + remaining + "s";
         }
 
+        private bool HasLiveTarget()
+        {
+            if (gameProcessId <= 0 || String.IsNullOrWhiteSpace(gameProcessName) || gameProcessStartTimeUtcTicks <= 0) return false;
+            try
+            {
+                using (Process process = Process.GetProcessById(gameProcessId))
+                    return !process.HasExited && process.StartTime.ToUniversalTime().Ticks == gameProcessStartTimeUtcTicks &&
+                        String.Equals(process.ProcessName, gameProcessName, StringComparison.OrdinalIgnoreCase);
+            }
+            catch { return false; }
+        }
+
         private void RenderHistory()
         {
             bool boosted = Storage.HasState();
-            currentMode.Text = boosted ? "CURRENT  GAME MODE ON" : "CURRENT  NORMAL";
-            currentMode.ForeColor = boosted ? Palette.Lime : Palette.Muted;
+            lastBoosted = boosted;
+            bool live = HasLiveTarget();
+            targetLabel.Text = live ? gameName + " / PID " + gameProcessId :
+                UiText.T("ยังไม่พบเกมที่กำลังเล่น", "No running game detected");
+            currentMode.Text = boosted ? UiText.T("สถานะเครื่อง: Boost เปิดอยู่", "System: Boost active") :
+                UiText.T("สถานะเครื่อง: ปกติ", "System: Normal");
+            currentMode.ForeColor = boosted ? Palette.Lime : Palette.Cyan;
+            prerequisites.Text = !live ? UiText.T("รอเกมที่เปิดอยู่ / การตรวจจับเกมทำงานต่อที่หน้าหลัก", "Waiting for a running game / Dashboard detection is active") :
+                !captureToolReady ? UiText.T("ไม่พบ PresentMon ที่ผ่านการตรวจสอบ / ต้องติดตั้งแอปใหม่", "Verified PresentMon is missing / Reinstall required") :
+                boosted ? UiText.T("พร้อมวัด Boosted 15 วินาที / Baseline ต้องคืนค่าที่หน้าหลักก่อน", "Ready for a 15-second Boosted run / Baseline requires Restore on the dashboard") :
+                UiText.T("พร้อมวัด Baseline 15 วินาที / Boosted ต้องเปิด Boost ที่หน้าหลักก่อน", "Ready for a 15-second Baseline run / Enable Boost on the dashboard for the Boosted run");
             FrameBenchmarkHistory history = FrameBenchmarkStore.Get(historyKey);
-            RenderPane(baselinePane, history.Baseline);
-            RenderPane(boostedPane, history.Boosted);
-            bool toolReady = PresentMonRunner.IsToolReady();
-            baselinePane.Capture.Enabled = !capturing && toolReady;
-            boostedPane.Capture.Enabled = !capturing && toolReady;
-            baselinePane.Capture.ForeColor = !boosted ? Palette.Muted : Palette.Amber;
-            boostedPane.Capture.ForeColor = boosted ? Palette.Lime : Palette.Muted;
-            baselinePane.Capture.Text = boosted ? "RESTORE TO CAPTURE" : "CAPTURE BASELINE";
-            boostedPane.Capture.Text = boosted ? "CAPTURE BOOSTED" : "BOOST TO CAPTURE";
+            RenderPane(baselinePane, history.Baseline); RenderPane(boostedPane, history.Boosted);
+            baselinePane.Capture.Enabled = !capturing && captureToolReady && live && !boosted;
+            boostedPane.Capture.Enabled = !capturing && captureToolReady && live && boosted;
+            baselinePane.Capture.Text = UiText.T("วัด Baseline", "Capture Baseline");
+            boostedPane.Capture.Text = UiText.T("วัด Boosted", "Capture Boosted");
             RenderComparison(history);
         }
 
@@ -3610,7 +3581,7 @@ namespace GameBoostPro
         {
             if (result == null)
             {
-                pane.Fps.Text = "NOT CAPTURED";
+                pane.Fps.Text = UiText.T("ยังไม่มีผลวัด", "Not captured");
                 pane.Detail.Text = "Average FPS  --\n1% Low  --    P95 frame  --";
                 pane.Mode.Text = "Present mode  --";
                 return;
@@ -3626,9 +3597,9 @@ namespace GameBoostPro
         {
             if (history.Baseline == null || history.Boosted == null)
             {
-                comparisonTitle.Text = "WAITING FOR A/B";
+                comparisonTitle.Text = UiText.T("รอผลก่อนและหลัง Boost", "Waiting for both runs");
                 comparisonTitle.ForeColor = Palette.Amber;
-                comparisonDetail.Text = "เก็บ Baseline ตอนโหมดปกติ และ Boosted ตอน Game Mode เปิด";
+                comparisonDetail.Text = UiText.T("ฉากและการตั้งค่าเกมต้องเหมือนกันทั้งสองรอบ\nAverage FPS / 1% Low ยิ่งสูงยิ่งดี และ P95 frame time ยิ่งต่ำยิ่งดี", "Use the same scene and game settings for both runs\nHigher Average FPS / 1% Low and lower P95 frame time are better");
                 return;
             }
             double averageDelta = PercentChange(history.Baseline.AverageFps, history.Boosted.AverageFps);
@@ -3652,7 +3623,7 @@ namespace GameBoostPro
             }
             comparisonDetail.Text = "Average " + FormatDelta(averageDelta) + "   /   1% Low " +
                 FormatDelta(lowDelta) + "   /   P95 frame " + FormatDelta(p95Improvement) +
-                " better\nทำซ้ำฉากเดิมอย่างน้อย 3 รอบก่อนตัดสินใจ";
+                UiText.T(" better\nทำซ้ำฉากเดิมอย่างน้อย 3 รอบก่อนตัดสินใจ", " better\nRepeat the same scene at least three times before deciding");
         }
 
         private static double PercentChange(double baseline, double current)
@@ -3673,27 +3644,40 @@ namespace GameBoostPro
         [DllImport("user32.dll")]
         private static extern bool SetForegroundWindow(IntPtr windowHandle);
 
-        private static Label CreateLabel(string text, int x, int y, int width, int height, float size,
-            FontStyle style, Color color)
-        {
-            return new Label
-            {
-                Text = text, Location = new Point(x, y), Size = new Size(width, height),
-                Font = new Font("Segoe UI", size, style), ForeColor = color, BackColor = Color.Transparent
-            };
-        }
+    }
 
-        private static Button CreateButton(string text, int x, int y, int width, Color back, Color fore)
+    internal sealed class NativeCpuReader : IDisposable
+    {
+        private ulong previousIdle, previousKernel, previousUser;
+        private bool sampled;
+        private readonly bool supported;
+        public NativeCpuReader()
         {
-            Button button = new Button
-            {
-                Text = text, Location = new Point(x, y), Size = new Size(width, 32), BackColor = back,
-                ForeColor = fore, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 8, FontStyle.Bold),
-                Cursor = Cursors.Hand
-            };
-            button.FlatAppearance.BorderSize = 0;
-            return button;
+            uint count = GetActiveProcessorCount(0xffff);
+            supported = count > 0 && count <= 64;
         }
+        public float NextValue()
+        {
+            ulong idle, kernel, user;
+            if (!supported || !GetSystemTimes(out idle, out kernel, out user)) { sampled = false; return Single.NaN; }
+            return Sample(idle, kernel, user);
+        }
+        internal float Sample(ulong idle, ulong kernel, ulong user)
+        {
+            float value = Single.NaN;
+            if (sampled && idle >= previousIdle && kernel >= previousKernel && user >= previousUser)
+            {
+                double total = (double)(kernel - previousKernel) + (user - previousUser);
+                if (total > 0) value = (float)Math.Max(0, Math.Min(100, (1 - (idle - previousIdle) / total) * 100));
+            }
+            previousIdle = idle; previousKernel = kernel; previousUser = user; sampled = true;
+            return value;
+        }
+        public void Dispose() { }
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool GetSystemTimes(out ulong idle, out ulong kernel, out ulong user);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern uint GetActiveProcessorCount(ushort group);
     }
 
     internal sealed class GpuUsageReader : IDisposable
@@ -3709,11 +3693,11 @@ namespace GameBoostPro
                 initializationAttempted = true;
                 try { category = new PerformanceCounterCategory("GPU Engine"); }
                 catch { category = null; }
-                return 0;
+                return Single.NaN;
             }
-            if (category == null) return 0;
+            if (category == null) return Single.NaN;
             Dictionary<string, CounterSample> current = new Dictionary<string, CounterSample>();
-            float total = 0;
+            Dictionary<string, float> engines = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
             try
             {
                 InstanceDataCollection values = category.ReadCategory()["Utilization Percentage"];
@@ -3726,13 +3710,37 @@ namespace GameBoostPro
                     if (previous.TryGetValue(name, out old))
                     {
                         float value = CounterSample.Calculate(old, sample);
-                        if (!Single.IsNaN(value) && !Single.IsInfinity(value) && value > 0) total += value;
+                        AddEngineUsage(engines, name, value);
                     }
                 }
                 previous = current;
             }
-            catch { return 0; }
-            return Math.Max(0, Math.Min(100, total));
+            catch { previous.Clear(); return Single.NaN; }
+            return GetBusiestEngine(engines);
+        }
+
+        internal static void AddEngineUsage(Dictionary<string, float> engines, string instance, float value)
+        {
+            if (String.IsNullOrWhiteSpace(instance) || Single.IsNaN(value) || Single.IsInfinity(value) || value < 0) return;
+            int luid = instance.IndexOf("_luid_", StringComparison.OrdinalIgnoreCase);
+            if (luid < 0 || instance.IndexOf("engtype_3D", StringComparison.OrdinalIgnoreCase) < 0) return;
+            string engine = instance.Substring(luid);
+            float total;
+            engines.TryGetValue(engine, out total);
+            engines[engine] = total + value;
+        }
+
+        internal static float GetBusiestEngine(Dictionary<string, float> engines)
+        {
+            if (engines.Count == 0) return Single.NaN;
+            float busiest = 0;
+            foreach (float usage in engines.Values) busiest = Math.Max(busiest, usage);
+            return Math.Min(100, busiest);
+        }
+
+        public void ResetSamples()
+        {
+            previous.Clear();
         }
 
         public void Dispose()
@@ -3759,33 +3767,42 @@ namespace GameBoostPro
         public Exception Error { get; set; }
     }
 
-    internal sealed class MainForm : Form
+    internal sealed partial class MainForm : Form
     {
         private const int DiscoveryMonitorIntervalMs = 1500;
         private const int ActiveMonitorIntervalMs = 3000;
         private readonly AppConfig config;
         private PlatformProfile platform;
-        private readonly Label platformLabel;
-        private readonly BoostDial dial;
-        private readonly Label stateText;
-        private readonly Label gameName;
-        private readonly Label gamePath;
-        private readonly Label powerStatus;
-        private readonly Label modeStatus;
-        private readonly Label captureStatus;
-        private readonly Label activityText;
-        private readonly ToggleSwitch autoSwitch;
-        private readonly CheckBox launchCheck;
-        private readonly Button browseButton;
-        private readonly Button libraryButton;
-        private readonly Button launchButton;
-        private readonly Button advancedButton;
-        private readonly Button gpuAdvisorButton;
-        private readonly MetricBar cpuBar;
-        private readonly MetricBar ramBar;
-        private readonly MetricBar gpuBar;
+        private Label platformLabel;
+        private BoostDial dial;
+        private Label stateText;
+        private Label gameName;
+        private Label gamePath;
+        private Label powerStatus;
+        private Label modeStatus;
+        private Label captureStatus;
+        private Label activityText;
+        private ToggleSwitch autoSwitch;
+        private CheckBox launchCheck;
+        private Button browseButton;
+        private Button libraryButton;
+        private Button launchButton;
+        private Button advancedButton;
+        private Button gpuAdvisorButton;
+        private Label adminStatus;
+        private FrameBenchmarkForm frameLab;
+        private CheckBox telemetryCheck;
+        private readonly ToolTip tips = new ToolTip();
+        private readonly bool isAdmin;
+        private string activityNotice = "";
+        private DateTime activityNoticeUntil;
+        private bool metricsWereCollected;
+        private bool autoBoostPausedUntilExit;
+        private MetricBar cpuBar;
+        private MetricBar ramBar;
+        private MetricBar gpuBar;
         private readonly Timer monitor;
-        private readonly PerformanceCounter cpuCounter;
+        private NativeCpuReader cpuCounter;
         private readonly GpuUsageReader gpuReader;
         private readonly NotifyIcon tray;
         private readonly object systemLock = new object();
@@ -3797,138 +3814,31 @@ namespace GameBoostPro
 
         public MainForm()
         {
+            isAdmin = SystemTuner.IsAdmin();
             config = Storage.LoadConfig();
+            UiText.Language = config.Language;
             platform = new PlatformProfile
             {
                 Kind = PlatformKind.UnsupportedLaptop,
                 IsSupported = false,
                 Title = "CHECKING SYSTEM",
-                Detail = "กำลังตรวจสอบชนิดเครื่องและ NitroSense"
+                Detail = UiText.T("กำลังตรวจสอบชนิดเครื่องและ NitroSense", "Checking device type and NitroSense")
             };
-            Text = "Game Boost Pro";
-            Icon appIcon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+            Icon appIcon = Icon.ExtractAssociatedIcon(typeof(MainForm).Assembly.Location);
             if (appIcon != null) Icon = appIcon;
-            StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(900, 610);
-            FormBorderStyle = FormBorderStyle.FixedSingle;
-            MaximizeBox = false;
-            BackColor = Palette.Back;
-            ForeColor = Palette.Text;
-            Font = new Font("Segoe UI", 10);
-
-            Label brand = MakeLabel("GAME BOOST", 30, 23, 210, 30, 16, FontStyle.Bold, Palette.Text);
-            Label pro = MakeLabel("PRO", 198, 26, 42, 22, 8, FontStyle.Bold, Palette.Back);
-            pro.BackColor = Palette.Lime;
-            pro.TextAlign = ContentAlignment.MiddleCenter;
-            Controls.Add(brand);
-            Controls.Add(pro);
-            pro.BringToFront();
-            Controls.Add(MakeLabel("Performance control / reversible profile", 30, 52, 320, 20, 8, FontStyle.Regular, Palette.Muted));
-            platformLabel = MakeLabel(platform.Title, 390, 59, 310, 20, 8, FontStyle.Bold, Palette.Amber);
-            Controls.Add(platformLabel);
-
-            gpuAdvisorButton = MakeButton("GPU ADVISOR", 566, 23, 134, 34, Palette.SurfaceHigh, Palette.Cyan);
-            gpuAdvisorButton.Click += OpenGraphicsAdvisor;
-            Controls.Add(gpuAdvisorButton);
-            advancedButton = MakeButton("ADVANCED", 708, 23, 160, 34, Palette.SurfaceHigh, Palette.Lime);
-            advancedButton.Click += OpenAdvancedSettings;
-            Controls.Add(advancedButton);
-            Label adminStatus = MakeLabel("ADMIN ACTIVE", 742, 59, 126, 17, 7, FontStyle.Bold, Palette.Muted);
-            adminStatus.TextAlign = ContentAlignment.MiddleRight;
-            Controls.Add(adminStatus);
-
-            Panel line = new Panel { BackColor = Palette.Line, Location = new Point(30, 86), Size = new Size(838, 1) };
-            Controls.Add(line);
-
-            dial = new BoostDial { Location = new Point(65, 118) };
-            dial.BoostClick += delegate { ToggleBoost(false); };
-            Controls.Add(dial);
-
-            stateText = MakeLabel("", 62, 447, 326, 46, 10, FontStyle.Regular, Palette.Muted);
-            stateText.TextAlign = ContentAlignment.TopCenter;
-            Controls.Add(stateText);
-
-            Panel divider = new Panel { BackColor = Palette.Line, Location = new Point(425, 116), Size = new Size(1, 375) };
-            Controls.Add(divider);
-
-            Controls.Add(MakeLabel("SMART GAME DETECTOR", 466, 117, 260, 28, 13, FontStyle.Bold, Palette.Text));
-            Controls.Add(MakeLabel("ตรวจจับจากโปรเซสและคลัง Steam / Epic / Riot", 466, 146, 380, 22, 8, FontStyle.Regular, Palette.Muted));
-
-            gameName = MakeLabel("พร้อมตรวจจับเกมอัตโนมัติ", 466, 185, 374, 24, 11, FontStyle.Bold, Palette.Text);
-            gamePath = MakeLabel("CS2 / PUBG / VALORANT / และเกมจากคลังที่พบ", 466, 211, 374, 38, 8, FontStyle.Regular, Palette.Muted);
-            gamePath.AutoEllipsis = true;
-            Controls.Add(gameName);
-            Controls.Add(gamePath);
-
-            browseButton = MakeButton("เพิ่มเกม...", 466, 258, 100, 36, Palette.SurfaceHigh, Palette.Text);
-            libraryButton = MakeButton("GAME LIBRARY", 575, 258, 124, 36, Palette.SurfaceHigh, Palette.Text);
-            launchButton = MakeButton("เปิดเกม", 708, 258, 136, 36, Palette.Lime, Palette.Back);
-            browseButton.Click += BrowseGame;
-            libraryButton.Click += OpenGameLibrary;
-            launchButton.Click += delegate { LaunchGame(); };
-            Controls.Add(browseButton);
-            Controls.Add(libraryButton);
-            Controls.Add(launchButton);
-
-            Controls.Add(MakeLabel("DETECT + BOOST อัตโนมัติ", 466, 320, 275, 24, 9, FontStyle.Bold, Palette.Text));
-            Controls.Add(MakeLabel("พบเกมแล้วเร่งให้ทันที และคืนค่าเมื่อเกมปิด", 466, 345, 310, 21, 8, FontStyle.Regular, Palette.Muted));
-            autoSwitch = new ToggleSwitch { Location = new Point(792, 323) };
-            autoSwitch.ValueChanged += delegate
-            {
-                config.AutoMode = autoSwitch.Value;
-                Storage.SaveConfig(config);
-            };
-            Controls.Add(autoSwitch);
-
-            launchCheck = new CheckBox();
-            launchCheck.Text = "กด BOOST แล้วเปิดเกมที่เลือก";
-            launchCheck.Location = new Point(466, 382);
-            launchCheck.Size = new Size(290, 28);
-            launchCheck.ForeColor = Palette.Muted;
-            launchCheck.FlatStyle = FlatStyle.Flat;
-            launchCheck.CheckedChanged += delegate
-            {
-                config.LaunchOnBoost = launchCheck.Checked;
-                Storage.SaveConfig(config);
-            };
-            Controls.Add(launchCheck);
-
-            Controls.Add(MakeLabel("PROTECTED  Discord / TeamSpeak 3 / NitroSense + Acer", 466, 410, 390, 18, 7, FontStyle.Bold, Palette.Amber));
-
-            Controls.Add(MakeLabel("สิ่งที่กำลังควบคุม", 466, 428, 220, 24, 9, FontStyle.Bold, Palette.Text));
-            powerStatus = MakeStatusLabel(466, 457);
-            modeStatus = MakeStatusLabel(610, 457);
-            captureStatus = MakeStatusLabel(748, 457);
-            Controls.Add(powerStatus);
-            Controls.Add(modeStatus);
-            Controls.Add(captureStatus);
-
-            Panel footer = new Panel { BackColor = Palette.Surface, Location = new Point(0, 512), Size = new Size(900, 98) };
-            Controls.Add(footer);
-            cpuBar = new MetricBar { Caption = "CPU", Location = new Point(30, 22) };
-            ramBar = new MetricBar { Caption = "MEMORY", Location = new Point(236, 22) };
-            gpuBar = new MetricBar { Caption = "GPU 3D", Location = new Point(442, 22) };
-            footer.Controls.Add(cpuBar);
-            footer.Controls.Add(ramBar);
-            footer.Controls.Add(gpuBar);
-            activityText = MakeLabel("พร้อมทำงาน", 650, 15, 218, 58, 8, FontStyle.Regular, Palette.Muted);
-            activityText.TextAlign = ContentAlignment.MiddleLeft;
-            activityText.AutoEllipsis = true;
-            footer.Controls.Add(activityText);
-
-            cpuCounter = new PerformanceCounter("Processor", "% Processor Time", "_Total");
+            BuildDashboard();
             gpuReader = new GpuUsageReader();
 
             monitor = new Timer();
             monitor.Interval = DiscoveryMonitorIntervalMs;
             monitor.Tick += MonitorTick;
-            monitor.Start();
+            if (Storage.UsesProtectedStateStore) monitor.Start();
 
             ContextMenuStrip trayMenu = new ContextMenuStrip();
-            trayMenu.Items.Add("เปิด Game Boost Pro", null, delegate { ShowFromTray(); });
-            trayMenu.Items.Add("สลับ Game Mode", null, delegate { ToggleBoost(false); });
+            trayMenu.Items.Add(UiText.T("เปิด Game Boost Pro", "Open Game Boost Pro"), null, delegate { ShowFromTray(); });
+            trayMenu.Items.Add(UiText.T("สลับ Game Mode", "Toggle Game Mode"), null, delegate { ToggleBoost(false); });
             trayMenu.Items.Add(new ToolStripSeparator());
-            trayMenu.Items.Add("ออกจากโปรแกรม", null, ExitApplication);
+            trayMenu.Items.Add(UiText.T("ออกจากโปรแกรม", "Exit"), null, ExitApplication);
             tray = new NotifyIcon();
             tray.Icon = appIcon != null ? (Icon)appIcon.Clone() : SystemIcons.Application;
             tray.Text = "Game Boost Pro";
@@ -3941,7 +3851,7 @@ namespace GameBoostPro
                 if (WindowState == FormWindowState.Minimized)
                 {
                     Hide();
-                    tray.ShowBalloonTip(1200, "Game Boost Pro", "ยังทำงานอยู่ที่มุมจอ", ToolTipIcon.Info);
+                    tray.ShowBalloonTip(1200, "Game Boost Pro", UiText.T("ยังทำงานอยู่ที่มุมจอ", "Still running in the system tray"), ToolTipIcon.Info);
                 }
             };
             FormClosing += OnFormClosing;
@@ -3951,7 +3861,8 @@ namespace GameBoostPro
                 monitor.Dispose();
                 if (detectedGame != null && detectedGame.Process != null) detectedGame.Process.Dispose();
                 gpuReader.Dispose();
-                cpuCounter.Dispose();
+                if (cpuCounter != null) cpuCounter.Dispose();
+                tips.Dispose();
                 tray.Dispose();
             };
 
@@ -3959,11 +3870,15 @@ namespace GameBoostPro
             launchCheck.Checked = config.LaunchOnBoost;
             autoSwitch.Enabled = false;
             dial.Enabled = false;
+            libraryButton.Enabled = GameDetector.IsCatalogLoaded;
             RefreshAdvancedButton();
             RefreshGameProfile();
             RefreshState(platform.Detail);
             Shown += delegate
             {
+                Rectangle area = Screen.FromControl(this).WorkingArea;
+                Size = new Size(Math.Min(Width, area.Width), Math.Min(Height, area.Height));
+                if (!Storage.UsesProtectedStateStore) return;
                 DetectPlatformAsync();
                 RefreshCatalogAsync();
             };
@@ -3983,8 +3898,8 @@ namespace GameBoostPro
                             platform = task.Result;
                             platformLabel.Text = platform.Title;
                             platformLabel.ForeColor = platform.IsSupported ? Palette.Cyan : Palette.Coral;
-                            dial.Enabled = platform.IsSupported;
-                            autoSwitch.Enabled = platform.IsSupported && !working;
+                            dial.Enabled = isAdmin && (platform.IsSupported || Storage.HasState());
+                            autoSwitch.Enabled = isAdmin && platform.IsSupported && !working;
                             if (!platform.IsSupported && config.AutoMode)
                             {
                                 config.AutoMode = false;
@@ -3992,7 +3907,7 @@ namespace GameBoostPro
                                 Storage.SaveConfig(config);
                             }
                             RefreshState(platform.IsSupported ? platform.Detail : platform.Detail +
-                                " / รองรับเฉพาะ Acer + NitroSense และ Desktop PC");
+                                UiText.T(" / รองรับเฉพาะ Acer + NitroSense และ Desktop PC", " / Supports Acer + NitroSense and Desktop PC only"));
                         }));
                     }
                     catch { }
@@ -4003,8 +3918,8 @@ namespace GameBoostPro
         {
             using (OpenFileDialog dialog = new OpenFileDialog())
             {
-                dialog.Title = "เลือกไฟล์เกม";
-                dialog.Filter = "ไฟล์เกม (*.exe)|*.exe";
+                dialog.Title = UiText.T("เลือกไฟล์เกม", "Select game executable");
+                dialog.Filter = UiText.T("ไฟล์เกม (*.exe)|*.exe", "Game executable (*.exe)|*.exe");
                 dialog.CheckFileExists = true;
                 dialog.InitialDirectory = !String.IsNullOrWhiteSpace(config.GamePath) && File.Exists(config.GamePath)
                     ? Path.GetDirectoryName(config.GamePath)
@@ -4016,16 +3931,18 @@ namespace GameBoostPro
                     config.LibraryGameDirectory = "";
                     config.LibraryLaunchTarget = "";
                     config.LibraryLaunchArguments = "";
+                    RememberManualGame();
                     Storage.SaveConfig(config);
+                    RefreshDashboardGames();
                     RefreshGameProfile();
-                    RefreshState("บันทึกโปรไฟล์ " + Path.GetFileNameWithoutExtension(config.GamePath) + " แล้ว");
+                    RefreshState(UiText.T("บันทึกโปรไฟล์ ", "Profile saved: ") + Path.GetFileNameWithoutExtension(config.GamePath) + UiText.T(" แล้ว", ""));
                 }
             }
         }
 
         private void OpenGameLibrary(object sender, EventArgs e)
         {
-            List<GameInstall> catalog = GameDetector.GetCatalog();
+            List<GameInstall> catalog = new List<GameInstall>(dashboardGames);
             if (!String.IsNullOrWhiteSpace(config.LibraryGameName) &&
                 !String.IsNullOrWhiteSpace(config.LibraryLaunchTarget) &&
                 String.IsNullOrWhiteSpace(config.LibraryLaunchArguments) && File.Exists(config.LibraryLaunchTarget))
@@ -4053,9 +3970,11 @@ namespace GameBoostPro
                 config.LibraryLaunchArguments = dialog.SelectedGame.LaunchArguments;
                 config.GamePath = String.Equals(dialog.SelectedGame.Source, "MANUAL", StringComparison.OrdinalIgnoreCase)
                     ? dialog.SelectedGame.LaunchTarget : "";
+                RememberManualGame();
                 Storage.SaveConfig(config);
+                RefreshDashboardGames();
                 RefreshGameProfile();
-                RefreshState("เลือก " + config.LibraryGameName + " จาก " + dialog.SelectedGame.Source + " แล้ว");
+                RefreshState(UiText.T("เลือก ", "Selected ") + config.LibraryGameName + UiText.T(" จาก ", " of ") + dialog.SelectedGame.Source + UiText.T(" แล้ว", ""));
                 if (dialog.LaunchRequested) LaunchGame();
             }
         }
@@ -4067,7 +3986,7 @@ namespace GameBoostPro
             if (String.IsNullOrWhiteSpace(target) ||
                 (target.IndexOf("://", StringComparison.OrdinalIgnoreCase) < 0 && !File.Exists(target)))
             {
-                ShowError("เกมนี้ไม่มีคำสั่งเปิดอัตโนมัติ กรุณาเปิดจาก Launcher ตามปกติ");
+                ShowNotice(UiText.T("เกมนี้ไม่มีคำสั่งเปิดอัตโนมัติ กรุณาเปิดจาก Launcher ตามปกติ", "No launch command is available. Open the game from its launcher"));
                 return;
             }
             try
@@ -4082,9 +4001,9 @@ namespace GameBoostPro
                     if (File.Exists(target)) info.WorkingDirectory = Path.GetDirectoryName(target);
                     Process.Start(info);
                 }
-                RefreshState("กำลังเปิด " + GetConfiguredGameName());
+                RefreshState(UiText.T("กำลังเปิด ", "Launching ") + GetConfiguredGameName());
             }
-            catch (Exception ex) { ShowError("เปิดเกมไม่สำเร็จ: " + ex.Message); }
+            catch (Exception ex) { ShowNotice(UiText.T("เปิดเกมไม่สำเร็จ: ", "Could not launch game: ") + ex.Message); }
         }
 
         private static void LaunchThroughDesktopShell(string target, string arguments)
@@ -4093,7 +4012,7 @@ namespace GameBoostPro
             try
             {
                 Type shellType = Type.GetTypeFromProgID("Shell.Application");
-                if (shellType == null) throw new InvalidOperationException("ไม่พบ Windows Desktop Shell");
+                if (shellType == null) throw new InvalidOperationException(UiText.T("ไม่พบ Windows Desktop Shell", "Windows Desktop Shell is unavailable"));
                 shell = Activator.CreateInstance(shellType);
                 string directory = File.Exists(target) ? Path.GetDirectoryName(target) : "";
                 shellType.InvokeMember("ShellExecute", System.Reflection.BindingFlags.InvokeMethod, null, shell,
@@ -4108,19 +4027,30 @@ namespace GameBoostPro
         private void ToggleBoost(bool autoTriggered)
         {
             if (working) return;
-            if (!platform.IsSupported)
+            bool restore = Storage.HasState();
+            if (!isAdmin)
             {
-                ShowError(platform.Detail + "\n\nรุ่นนี้รองรับเฉพาะ Acer Laptop ที่มี NitroSense และ Desktop PC");
+                ShowNotice(UiText.T("ต้องใช้สิทธิ์ Administrator เพื่อเปิดโหมดเกมหรือคืนค่า", "Administrator access is required to Boost or restore"));
+                return;
+            }
+            if (!restore && !platform.IsSupported)
+            {
+                ShowError(platform.Detail + UiText.T("\n\nรุ่นนี้รองรับเฉพาะ Acer Laptop ที่มี NitroSense และ Desktop PC", "\n\nSupports Acer laptops with NitroSense and Desktop PCs only"));
                 return;
             }
             working = true;
             dial.Busy = true;
             SetControlsEnabled(false);
-            bool restore = Storage.HasState();
+            activityNotice = "";
+            ReportTransitionProgress(restore ? UiText.T("กำลังเตรียมคืนค่า", "Preparing restore") : UiText.T("กำลังเตรียมโหมดเกม", "Preparing Game Mode"));
             DetectedGame candidate = detectedGame;
             string targetPath = BoostTargetResolver.ResolveGamePath(candidate, config.GamePath);
             int processId = candidate != null && candidate.Process != null ? candidate.Process.Id : 0;
             bool shouldLaunch = config.LaunchOnBoost && !autoTriggered && !restore;
+            string profileKey = candidate == null ? BoostProfiles.SelectedKey(config) :
+                String.IsNullOrWhiteSpace(candidate.ExePath) ? "" :
+                BoostProfiles.ResolveKey(config, candidate.ExePath, dashboardGames);
+            AppConfig sessionOptions = BoostProfiles.Snapshot(config, profileKey, platform);
 
             Task.Factory.StartNew(delegate
             {
@@ -4133,14 +4063,14 @@ namespace GameBoostPro
                 {
                     lock (systemLock)
                     {
-                        if (restore) SystemTuner.Disable();
-                        else SystemTuner.Enable(targetPath, autoTriggered, processId, platform, config);
+                        if (restore) SystemTuner.Disable(ReportTransitionProgress);
+                        else SystemTuner.Enable(targetPath, autoTriggered, processId, platform, sessionOptions, ReportTransitionProgress);
                     }
                     result.Activity = restore
-                        ? (autoTriggered ? "เกมปิดแล้ว คืนค่าเครื่องเรียบร้อย" : "คืนค่าเครื่องกลับเป็นปกติแล้ว")
+                        ? (autoTriggered ? UiText.T("เกมปิดแล้ว คืนค่าเครื่องเรียบร้อย", "Game exited; original settings restored") : UiText.T("คืนค่าเครื่องกลับเป็นปกติแล้ว", "Original settings restored"))
                         : (autoTriggered && candidate != null
-                            ? "ตรวจพบ " + candidate.DisplayName + " / เปิด Best Mode แล้ว"
-                            : "Best Mode พร้อมทำงาน / รอจับโปรเซสเกม");
+                            ? UiText.T("ตรวจพบ ", "Detected ") + candidate.DisplayName + UiText.T(" / เปิดโหมดเกมแล้ว", " / Game Mode active")
+                            : UiText.T("เปิดโหมดเกมแล้ว / รอโปรเซสเกม", "Game Mode active / Waiting for game process"));
                 }
                 catch (Exception ex) { result.Error = ex; }
                 return result;
@@ -4154,12 +4084,13 @@ namespace GameBoostPro
                             ? task.Result : new BoostTransitionResult { Error = task.Exception };
                         if (result.Error == null)
                         {
+                            autoBoostPausedUntilExit = result.WasRestore && !autoTriggered;
                             if (result.ShouldLaunch) LaunchGame();
                             RefreshState(result.Activity);
                         }
                         else
                         {
-                            RefreshState("ตรวจพบปัญหา กรุณาดูข้อความแจ้งเตือน");
+                            RefreshState(UiText.T("ตรวจพบปัญหา กรุณาดูข้อความแจ้งเตือน", "A problem was found. Check the error message"));
                             ShowError(result.Error.GetBaseException().Message);
                         }
                         working = false;
@@ -4175,23 +4106,32 @@ namespace GameBoostPro
         private void MonitorTick(object sender, EventArgs e)
         {
             if (System.Threading.Interlocked.Exchange(ref monitorInFlight, 1) != 0) return;
-            bool collectMetrics = Visible && WindowState != FormWindowState.Minimized;
+            bool collectMetrics = config.ShowTelemetry && !working && Visible && WindowState != FormWindowState.Minimized;
             Task.Factory.StartNew<MonitorSnapshot>(delegate { return BuildMonitorSnapshot(collectMetrics); }).ContinueWith(delegate(Task<MonitorSnapshot> task)
             {
                 try
                 {
                     if (IsDisposed || Disposing)
                     {
+                        if (task.Status == TaskStatus.RanToCompletion) DisposeSnapshotGame(task.Result);
                         System.Threading.Interlocked.Exchange(ref monitorInFlight, 0);
                         return;
                     }
                     BeginInvoke(new Action(delegate
                     {
                         System.Threading.Interlocked.Exchange(ref monitorInFlight, 0);
-                        if (task.Status == TaskStatus.RanToCompletion) ApplyMonitorSnapshot(task.Result);
+                        if (task.Status == TaskStatus.RanToCompletion)
+                        {
+                            if (IsDisposed || Disposing) DisposeSnapshotGame(task.Result);
+                            else ApplyMonitorSnapshot(task.Result);
+                        }
                     }));
                 }
-                catch { System.Threading.Interlocked.Exchange(ref monitorInFlight, 0); }
+                catch
+                {
+                    if (task.Status == TaskStatus.RanToCompletion) DisposeSnapshotGame(task.Result);
+                    System.Threading.Interlocked.Exchange(ref monitorInFlight, 0);
+                }
             });
         }
 
@@ -4227,11 +4167,20 @@ namespace GameBoostPro
             if (collectMetrics)
             {
                 snapshot.HasMetrics = true;
-                try { snapshot.Cpu = cpuCounter.NextValue(); } catch { }
+                snapshot.Cpu = snapshot.Memory = snapshot.Gpu = Single.NaN;
+                try
+                {
+                    EnsureCpuCounter();
+                    float cpu = cpuCounter == null ? Single.NaN : cpuCounter.NextValue();
+                    if (metricsWereCollected) snapshot.Cpu = cpu;
+                }
+                catch { }
                 try { snapshot.Gpu = gpuReader.NextValue(); } catch { }
                 MEMORYSTATUSEX memory = new MEMORYSTATUSEX();
                 if (GlobalMemoryStatusEx(memory)) snapshot.Memory = memory.dwMemoryLoad;
             }
+            else if (metricsWereCollected) gpuReader.ResetSamples();
+            metricsWereCollected = collectMetrics;
             if (working) return snapshot;
 
             snapshot.Game = GameDetector.FindRunningGame(config.GamePath);
@@ -4265,13 +4214,13 @@ namespace GameBoostPro
 
         private void ApplyMonitorSnapshot(MonitorSnapshot snapshot)
         {
-            if (snapshot.HasMetrics)
+            if (snapshot.HasMetrics && config.ShowTelemetry)
             {
                 cpuBar.Value = snapshot.Cpu;
                 ramBar.Value = snapshot.Memory;
                 gpuBar.Value = snapshot.Gpu;
             }
-            if (working) return;
+            if (working) { DisposeSnapshotGame(snapshot); return; }
 
             if (detectedGame != null && detectedGame.Process != null &&
                 (snapshot.Game == null || !Object.ReferenceEquals(detectedGame.Process, snapshot.Game.Process)))
@@ -4287,7 +4236,8 @@ namespace GameBoostPro
             {
                 missingGameTicks = 0;
                 ShowDetectedGame(detectedGame);
-                if (config.AutoMode && !Storage.HasState())
+                if (isAdmin && platform.IsSupported && config.AutoMode && !autoBoostPausedUntilExit &&
+                    !Storage.HasState() && !Storage.HasRecoveryWarning)
                 {
                     ToggleBoost(true);
                     return;
@@ -4305,19 +4255,108 @@ namespace GameBoostPro
             }
             else
             {
+                if (autoBoostPausedUntilExit && ++missingGameTicks >= 2)
+                {
+                    autoBoostPausedUntilExit = false;
+                    missingGameTicks = 0;
+                }
                 RefreshGameProfile();
             }
 
-            launchButton.Text = running ? "กำลังเล่น" : "เปิดเกม";
+            launchButton.Text = running ? UiText.T("กำลังเล่น", "Playing") : UiText.T("เปิดเกม", "Launch");
             launchButton.Enabled = !running && !working && CanLaunchConfiguredGame();
+            UpdateStateVisuals();
         }
 
         private void UpdateMetrics()
         {
+            EnsureCpuCounter();
             try { cpuBar.Value = cpuCounter.NextValue(); } catch { }
             try { gpuBar.Value = gpuReader.NextValue(); } catch { }
             MEMORYSTATUSEX memory = new MEMORYSTATUSEX();
             if (GlobalMemoryStatusEx(memory)) ramBar.Value = memory.dwMemoryLoad;
+        }
+
+        private void ClearMetrics()
+        {
+            cpuBar.Value = ramBar.Value = gpuBar.Value = Single.NaN;
+        }
+
+        private bool cpuCounterInitialized;
+        private void EnsureCpuCounter()
+        {
+            if (cpuCounterInitialized) return;
+            cpuCounterInitialized = true;
+            try { cpuCounter = new NativeCpuReader(); }
+            catch { }
+        }
+
+        private void DisposeSnapshotGame(MonitorSnapshot snapshot)
+        {
+            if (snapshot != null && snapshot.Game != null && snapshot.Game.Process != null &&
+                (detectedGame == null || !Object.ReferenceEquals(detectedGame.Process, snapshot.Game.Process)))
+                snapshot.Game.Process.Dispose();
+        }
+
+        private void ReportTransitionProgress(string message)
+        {
+            try
+            {
+                if (IsDisposed || Disposing || !IsHandleCreated) return;
+                if (InvokeRequired) { BeginInvoke(new Action<string>(ReportTransitionProgress), message); return; }
+                if (!working) return;
+                stateText.Text = message;
+                activityText.Text = message;
+            }
+            catch (InvalidOperationException) { }
+        }
+
+        private void ShowNotice(string message)
+        {
+            activityNotice = message;
+            activityNoticeUntil = DateTime.UtcNow.AddSeconds(12);
+            activityText.Text = message;
+            activityText.ForeColor = Palette.Amber;
+        }
+
+        private void RestartAsAdmin(object sender, EventArgs e)
+        {
+            if (isAdmin) return;
+            try
+            {
+                // The child waits until the old process releases the single-instance mutex.
+                Process.Start(new ProcessStartInfo(Application.ExecutablePath,
+                    "--wait-for-exit " + Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture))
+                    { UseShellExecute = true, Verb = "runas" });
+                allowClose = true;
+                Close();
+            }
+            catch (Win32Exception ex)
+            {
+                ShowNotice(ex.NativeErrorCode == 1223 ? UiText.T("ยกเลิกการขอสิทธิ์ Admin แล้ว", "Admin request cancelled") : UiText.T("เปิดโปรแกรมใหม่ไม่สำเร็จ: ", "Could not restart app: ") + ex.Message);
+            }
+        }
+
+        private static TableLayoutPanel CreateGrid(int columns, int rows)
+        {
+            TableLayoutPanel panel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = columns, RowCount = rows,
+                Margin = Padding.Empty, Padding = Padding.Empty, BackColor = Color.Transparent };
+            panel.SuspendLayout();
+            return panel;
+        }
+
+        private static void ResumeGridLayout(Control control)
+        {
+            TableLayoutPanel grid = control as TableLayoutPanel;
+            if (grid != null)
+            {
+                while (grid.ColumnStyles.Count < grid.ColumnCount)
+                    grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / grid.ColumnCount));
+                while (grid.RowStyles.Count < grid.RowCount)
+                    grid.RowStyles.Add(new RowStyle(SizeType.Percent, 100f / grid.RowCount));
+            }
+            foreach (Control child in control.Controls) ResumeGridLayout(child);
+            control.ResumeLayout(true);
         }
 
         private void RefreshGameProfile()
@@ -4326,14 +4365,17 @@ namespace GameBoostPro
             bool libraryValid = !String.IsNullOrWhiteSpace(config.LibraryGameName) &&
                 !String.IsNullOrWhiteSpace(config.LibraryGameDirectory) && Directory.Exists(config.LibraryGameDirectory);
             gameName.ForeColor = Palette.Text;
-            gameName.Text = libraryValid ? "พร้อมเล่น: " + config.LibraryGameName : "พร้อมตรวจจับเกมอัตโนมัติ";
+            gameName.Text = !String.IsNullOrWhiteSpace(config.LibraryGameName) ? config.LibraryGameName :
+                !String.IsNullOrWhiteSpace(config.GamePath) ? Path.GetFileNameWithoutExtension(config.GamePath) :
+                UiText.T("ยังไม่ได้เลือกเกม", "No game selected");
             string catalogStatus = GameDetector.IsCatalogLoaded
-                ? "พบเกมในคลัง " + GameDetector.InstalledCount + " รายการ"
-                : "กำลังอ่านคลัง Steam / Epic / Riot";
+                ? UiText.T("เกมที่ตรวจพบ: ", "Discovered games: ") + GameDetector.InstalledCount
+                : UiText.T("กำลังอ่านคลัง Steam / Epic / Riot", "Scanning Steam / Epic / Riot");
             gamePath.Text = catalogStatus +
-                (manualValid ? " / สำรอง: " + Path.GetFileNameWithoutExtension(config.GamePath) :
+                (manualValid ? UiText.T(" / สำรอง: ", " / fallback: ") + Path.GetFileNameWithoutExtension(config.GamePath) :
                 libraryValid ? " / " + config.LibraryGameDirectory : "");
-            launchButton.Enabled = CanLaunchConfiguredGame();
+            launchButton.Enabled = !working && detectedGame == null && CanLaunchConfiguredGame();
+            RefreshPresetControls();
         }
 
         private void RefreshCatalogAsync()
@@ -4347,6 +4389,7 @@ namespace GameBoostPro
                     BeginInvoke(new Action(delegate
                     {
                         libraryButton.Enabled = !working && GameDetector.IsCatalogLoaded;
+                        RefreshDashboardGames();
                         RefreshGameProfile();
                     }));
                 }
@@ -4358,7 +4401,7 @@ namespace GameBoostPro
         {
             if (!String.IsNullOrWhiteSpace(config.LibraryGameName)) return config.LibraryGameName;
             return String.IsNullOrWhiteSpace(config.GamePath)
-                ? "เกม" : Path.GetFileNameWithoutExtension(config.GamePath);
+                ? UiText.T("เกม", "Game") : Path.GetFileNameWithoutExtension(config.GamePath);
         }
 
         private bool CanLaunchConfiguredGame()
@@ -4372,18 +4415,20 @@ namespace GameBoostPro
 
         private void ShowDetectedGame(DetectedGame game)
         {
-            gameName.Text = "ตรวจพบ: " + game.DisplayName;
-            gameName.ForeColor = Palette.Cyan;
-            string detail = game.Source + " / " + Path.GetFileName(game.ExePath ?? "กำลังทำงาน");
-            gamePath.Text = detail;
+            // Keep the selected profile stable while another game is detected.
+            gameName.ForeColor = Palette.Text;
+            string detail = game.Source + " / " + Path.GetFileName(game.ExePath ?? UiText.T("กำลังทำงาน", "Working"));
+            tips.SetToolTip(stateText, UiText.T("กำลังเล่น: ", "Playing: ") + game.DisplayName + " / " + detail);
             BoostState activeState = null;
             try { activeState = Storage.LoadState(); }
             catch { }
+            if (working || DateTime.UtcNow < activityNoticeUntil) return;
             activityText.Text = activeState != null
                 ? game.DisplayName + " / " + GetProcessStatusText(activeState) +
                     (String.IsNullOrWhiteSpace(activeState.ProcessTuningDetail) ? "" :
                     "\n" + activeState.ProcessTuningDetail)
-                : "พบ " + game.DisplayName + " / กำลังเตรียม Boost";
+                : UiText.T("พบ ", "Found ") + game.DisplayName + (config.AutoMode && isAdmin && !autoBoostPausedUntilExit ?
+                    UiText.T(" / รอเปิดโหมดเกม", " / Waiting to Boost") : UiText.T(" / ยังไม่เปิดโหมดเกม", " / Boost inactive"));
         }
 
         private void RefreshState(string activity)
@@ -4398,10 +4443,23 @@ namespace GameBoostPro
             try { currentState = Storage.LoadState(); }
             catch { }
             bool active = currentState != null || Storage.HasState();
+            adminStatus.Text = UiText.T("สิทธิ์ Admin พร้อม", "Admin granted");
+            adminStatus.Visible = isAdmin;
+            elevationButton.Visible = !isAdmin;
+            elevationButton.Text = UiText.T("ขอสิทธิ์ Admin", "Run as Admin");
+            launchButton.BackColor = launchButton.Enabled ? Palette.Lime : Palette.SurfaceHigh;
+            launchButton.ForeColor = launchButton.Enabled ? Palette.Back : Palette.Muted;
             dial.Active = active;
-            stateText.Text = active
-                ? "เครื่องอยู่ในโหมดเล่นเกม\nกดอีกครั้งเพื่อคืนค่าทุกอย่าง"
-                : "เครื่องอยู่ในโหมดปกติ\nค่าทุกอย่างพร้อมถูกจดจำก่อน Boost";
+            dial.Enabled = isAdmin && (active || (platform.IsSupported && !Storage.HasRecoveryWarning));
+            if (!working) stateText.Text = !isAdmin ? UiText.T("ต้องใช้สิทธิ์ Admin", "Admin required") : active
+                ? (currentState != null && !String.IsNullOrWhiteSpace(currentState.Preset)
+                    ? UiText.Preset(currentState.Preset) + UiText.T(" / ใช้อยู่", " / active") : UiText.T("Boost เปิดอยู่", "Boost active"))
+                : autoBoostPausedUntilExit && config.AutoMode ?
+                    UiText.T("คืนค่าแล้ว / พัก Auto", "Restored / Auto paused") : platform.IsSupported
+                    ? UiText.T("พร้อมเล่น", "Ready to play") : platform.Title == "CHECKING SYSTEM"
+                        ? UiText.T("กำลังตรวจสอบเครื่อง", "Checking system") : UiText.T("เครื่องนี้ยังไม่รองรับ", "Device not supported");
+            stateText.ForeColor = active ? Palette.Lime : !platform.IsSupported && platform.Title != "CHECKING SYSTEM"
+                ? Palette.Coral : Palette.Text;
             int optionCount = GetAdvancedOptionCount();
             string configuredPower = PowerPlanPolicy.GetShortLabel(config.PowerPlanMode);
             string powerText = configuredPower + (active ? " ON" : " READY");
@@ -4412,7 +4470,7 @@ namespace GameBoostPro
             SetStatus(powerStatus, active, powerText);
 
             string tuningText = active && currentState != null ? GetProcessStatusText(currentState) :
-                (optionCount == 6 ? "BEST 6/6" : "CUSTOM " + optionCount + "/6");
+                UiText.T("เลือกไว้ ", "Selected ") + optionCount + "/6";
             Color tuningColor = currentState != null &&
                 (String.Equals(currentState.ProcessTuningStatus, "Blocked", StringComparison.Ordinal) ||
                 String.Equals(currentState.ProcessTuningStatus, "NotRetained", StringComparison.Ordinal))
@@ -4426,79 +4484,107 @@ namespace GameBoostPro
                 activityText.Text = Storage.RecoveryWarning;
                 activityText.ForeColor = Palette.Coral;
             }
+            else if (DateTime.UtcNow < activityNoticeUntil)
+            {
+                activityText.Text = activityNotice;
+                activityText.ForeColor = Palette.Amber;
+            }
             else activityText.ForeColor = Palette.Muted;
             tray.Text = active ? "Game Boost Pro - Game Mode ON" : "Game Boost Pro - Normal";
-            advancedButton.Enabled = !active && !working;
+            advancedButton.Enabled = !working;
+            RefreshPresetControls();
+            UpdateFrameLabTarget();
+            languageButton.Enabled = frameLab == null || !frameLab.IsCapturing;
         }
 
         private static string GetProcessStatusText(BoostState state)
         {
-            if (state == null) return "TUNING WAIT";
-            if (String.Equals(state.ProcessTuningStatus, "Applied", StringComparison.Ordinal)) return "TUNING OK";
-            if (String.Equals(state.ProcessTuningStatus, "Partial", StringComparison.Ordinal)) return "PARTIAL";
-            if (String.Equals(state.ProcessTuningStatus, "Blocked", StringComparison.Ordinal)) return "GAME BLOCKED";
-            if (String.Equals(state.ProcessTuningStatus, "NotRetained", StringComparison.Ordinal)) return "NOT RETAINED";
-            if (String.Equals(state.ProcessTuningStatus, "NotRequested", StringComparison.Ordinal)) return "TUNING OFF";
+            if (state == null) return UiText.T("รอเปิดเกม", "Waiting for game");
+            if (String.Equals(state.ProcessTuningStatus, "Applied", StringComparison.Ordinal)) return UiText.T("ยืนยันแล้ว", "Verified");
+            if (String.Equals(state.ProcessTuningStatus, "Partial", StringComparison.Ordinal)) return UiText.T("ใช้ได้บางค่า", "Partly applied");
+            if (String.Equals(state.ProcessTuningStatus, "Blocked", StringComparison.Ordinal)) return UiText.T("เกมไม่อนุญาต", "Blocked by game");
+            if (String.Equals(state.ProcessTuningStatus, "NotRetained", StringComparison.Ordinal)) return UiText.T("เกมเปลี่ยนค่ากลับ", "Reverted by game");
+            if (String.Equals(state.ProcessTuningStatus, "NotRequested", StringComparison.Ordinal)) return UiText.T("ไม่ปรับ CPU", "CPU unchanged");
             if (String.Equals(state.ProcessTuningStatus, "LegacyUnverified", StringComparison.Ordinal)) return "LEGACY SAFE";
             return "WAITING GAME";
         }
 
         private void SetControlsEnabled(bool enabled)
         {
+            gameList.Enabled = enabled;
+            gameSearch.Enabled = enabled;
             browseButton.Enabled = enabled;
             libraryButton.Enabled = enabled && GameDetector.IsCatalogLoaded;
-            autoSwitch.Enabled = enabled && platform.IsSupported;
+            autoSwitch.Enabled = enabled && isAdmin && platform.IsSupported;
             launchCheck.Enabled = enabled;
-            advancedButton.Enabled = enabled && !Storage.HasState();
-            launchButton.Enabled = enabled && CanLaunchConfiguredGame();
+            advancedButton.Enabled = enabled;
+            launchButton.Enabled = enabled && detectedGame == null && CanLaunchConfiguredGame();
+            gpuAdvisorButton.Enabled = enabled;
+            frameLabButton.Enabled = enabled;
         }
 
         private void OpenAdvancedSettings(object sender, EventArgs e)
         {
-            if (Storage.HasState())
-            {
-                ShowError("กรุณากด RESTORE ก่อนเปลี่ยน Advanced Mode");
-                return;
-            }
+            if (working) return;
             using (AdvancedSettingsForm dialog = new AdvancedSettingsForm(config))
             {
                 if (dialog.ShowDialog(this) != DialogResult.OK) return;
                 RefreshAdvancedButton();
                 RefreshState(GetAdvancedOptionCount() == 6
-                    ? "Advanced Mode: BEST / เปิดครบทุกระบบ"
+                    ? UiText.T("Advanced Mode: BEST / เปิดครบทุกระบบ", "Advanced: all settings allowed")
                     : "Advanced Mode: CUSTOM " + GetAdvancedOptionCount() + "/6");
+                ShowNotice(UiText.T("บันทึกค่าที่อนุญาตแล้ว", "Allowed settings saved") + NextSessionNotice());
             }
         }
 
         private void OpenGraphicsAdvisor(object sender, EventArgs e)
         {
-            string selectedName = detectedGame != null ? detectedGame.DisplayName : GetConfiguredGameName();
-            string selectedPath = detectedGame != null
-                ? detectedGame.ExePath : (!String.IsNullOrWhiteSpace(config.GamePath)
-                    ? config.GamePath : config.LibraryLaunchTarget);
-            int processId = 0;
-            string processName = "";
-            long processStartTimeUtcTicks = 0;
+            using (GraphicsAdvisorForm dialog = new GraphicsAdvisorForm(GetConfiguredGameName(),
+                config.GamePath, config.LibraryGameDirectory, config))
+                dialog.ShowDialog(this);
+            RefreshPresetControls();
+            RefreshAdvancedButton();
+        }
+
+        private void OpenFrameLab(object sender, EventArgs e)
+        {
+            if (frameLab == null || frameLab.IsDisposed)
+            {
+                frameLab = new FrameBenchmarkForm("", 0, "", 0);
+                frameLab.FormClosed += delegate { frameLab = null; };
+            }
+            UpdateFrameLabTarget();
+            if (!frameLab.Visible) frameLab.Show(this);
+            frameLab.WindowState = FormWindowState.Normal;
+            frameLab.Activate();
+        }
+
+        private void UpdateFrameLabTarget()
+        {
+            if (frameLab == null || frameLab.IsDisposed) return;
+            int id = 0;
+            string name = "", display = "";
+            long start = 0;
             if (detectedGame != null && detectedGame.Process != null)
             {
                 try
                 {
-                    processId = detectedGame.Process.Id;
-                    processName = detectedGame.Process.ProcessName;
-                    processStartTimeUtcTicks = detectedGame.Process.StartTime.ToUniversalTime().Ticks;
+                    id = detectedGame.Process.Id;
+                    name = detectedGame.Process.ProcessName;
+                    start = detectedGame.Process.StartTime.ToUniversalTime().Ticks;
+                    display = detectedGame.DisplayName;
                 }
-                catch { }
+                catch { id = 0; }
             }
-            using (GraphicsAdvisorForm dialog = new GraphicsAdvisorForm(selectedName, selectedPath,
-                config.LibraryGameDirectory, processId, processName, processStartTimeUtcTicks))
-                dialog.ShowDialog(this);
+            frameLab.SetTarget(display, id, name, start);
         }
 
         private void RefreshAdvancedButton()
         {
             int enabled = GetAdvancedOptionCount();
-            advancedButton.Text = enabled == 6 ? "ADVANCED  BEST" : "ADVANCED  " + enabled + "/6";
-            advancedButton.ForeColor = enabled == 6 ? Palette.Lime : Palette.Amber;
+            advancedButton.Text = UiText.T("ตั้งค่าขั้นสูง", "Advanced");
+            advancedButton.ForeColor = Palette.Text;
+            tips.SetToolTip(advancedButton, UiText.T("เลือกไว้ ", "Selected ") + enabled + UiText.T(" จาก 6 ค่า / แผนพลังงาน", " of 6 settings / Power plan"));
         }
 
         private int GetAdvancedOptionCount()
@@ -4522,10 +4608,16 @@ namespace GameBoostPro
 
         private void ExitApplication(object sender, EventArgs e)
         {
+            if (working)
+            {
+                ShowNotice(UiText.T("รอให้ปรับระบบหรือคืนค่าเสร็จก่อนออกจากโปรแกรม", "Wait for the transition or restore to finish before exiting"));
+                ShowFromTray();
+                return;
+            }
             if (Storage.HasState())
             {
                 DialogResult result = MessageBox.Show(this,
-                    "Game Mode ยังเปิดอยู่ ต้องการคืนค่าเครื่องก่อนออกหรือไม่?",
+                    UiText.T("Game Mode ยังเปิดอยู่ ต้องการคืนค่าเครื่องก่อนออกหรือไม่?", "Game Mode is active. Restore original settings before exiting?"),
                     "Game Boost Pro", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
                 if (result == DialogResult.Cancel) return;
                 if (result == DialogResult.Yes)
@@ -4542,6 +4634,12 @@ namespace GameBoostPro
         private void OnFormClosing(object sender, FormClosingEventArgs e)
         {
             if (allowClose) return;
+            if (working)
+            {
+                e.Cancel = true;
+                Hide();
+                return;
+            }
             if (!config.AutoMode && !Storage.HasState())
             {
                 tray.Visible = false;
@@ -4549,7 +4647,7 @@ namespace GameBoostPro
             }
             e.Cancel = true;
             Hide();
-            tray.ShowBalloonTip(1200, "Game Boost Pro", "โปรแกรมยังทำงานอยู่ กดไอคอนเพื่อเปิดอีกครั้ง", ToolTipIcon.Info);
+            tray.ShowBalloonTip(1200, "Game Boost Pro", UiText.T("โปรแกรมยังทำงานอยู่ กดไอคอนเพื่อเปิดอีกครั้ง", "Still running in the tray. Click the icon to reopen"), ToolTipIcon.Info);
         }
 
         private void ShowError(string message)
@@ -4564,7 +4662,7 @@ namespace GameBoostPro
                 Text = text,
                 Location = new Point(x, y),
                 Size = new Size(width, height),
-                Font = new Font("Segoe UI", size, style),
+                Font = new Font("Leelawadee UI", size, style),
                 ForeColor = color,
                 BackColor = Color.Transparent
             };
@@ -4572,7 +4670,7 @@ namespace GameBoostPro
 
         private static Button MakeButton(string text, int x, int y, int width, int height, Color back, Color fore)
         {
-            Button button = new Button();
+            Button button = new DashboardButton();
             button.Text = text;
             button.Location = new Point(x, y);
             button.Size = new Size(width, height);
@@ -4580,7 +4678,7 @@ namespace GameBoostPro
             button.ForeColor = fore;
             button.FlatStyle = FlatStyle.Flat;
             button.FlatAppearance.BorderSize = 0;
-            button.Font = new Font("Segoe UI", 9, FontStyle.Bold);
+            button.Font = new Font("Leelawadee UI", 9, FontStyle.Bold);
             button.Cursor = Cursors.Hand;
             return button;
         }
@@ -4629,14 +4727,20 @@ namespace GameBoostPro
         private static extern bool SetProcessDPIAware();
 
         [STAThread]
-        private static void Main()
+        private static void Main(string[] args)
         {
+            int oldPid;
+            if (args.Length == 2 && args[0] == "--wait-for-exit" && Int32.TryParse(args[1], out oldPid))
+            {
+                try { using (Process old = Process.GetProcessById(oldPid)) old.WaitForExit(10000); }
+                catch (ArgumentException) { }
+            }
             bool created;
             using (System.Threading.Mutex instance = new System.Threading.Mutex(true, @"Local\Codex.GameBoostPro", out created))
             {
                 if (!created)
                 {
-                    MessageBox.Show("Game Boost Pro เปิดอยู่แล้วที่มุมจอ", "Game Boost Pro",
+                    MessageBox.Show(UiText.T("Game Boost Pro เปิดอยู่แล้วที่มุมจอ", "Game Boost Pro is already running in the tray"), "Game Boost Pro",
                         MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
                 }
