@@ -1,0 +1,29 @@
+[package]
+name = "gameboostpro"
+version = "4.0.0"
+description = "Game Boost Pro: reversible Windows game sessions"
+authors = ["ThanawatSSS"]
+edition = "2021"
+rust-version = "1.99"
+license = "MIT"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+winreg = "0.55"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4", "serde"] }
+csv = "1"
+steamlocate = "2"
+rfd = "0.15"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Com", "Win32_System_Threading", "Win32_System_ProcessStatus", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Power", "Win32_System_SystemInformation", "Win32_System_Memory", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_Graphics_Gdi", "Win32_System_Registry"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "unwind"

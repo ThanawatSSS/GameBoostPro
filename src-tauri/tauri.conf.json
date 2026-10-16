@@ -1,0 +1,19 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Game Boost Pro",
+  "version": "4.0.0",
+  "identifier": "com.thanawatsss.gameboostpro",
+  "build": { "beforeDevCommand": "npm run dev", "devUrl": "http://127.0.0.1:1420", "beforeBuildCommand": "npm run build", "frontendDist": "../web-dist" },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [{ "label": "main", "title": "Game Boost Pro 4.0", "width": 1160, "height": 790, "minWidth": 660, "minHeight": 540, "backgroundColor": "#121414" }],
+    "security": { "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: data:; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'", "capabilities": [{ "identifier": "main-window", "windows": ["main"], "permissions": ["core:default"] }] }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/icon.ico"],
+    "resources": { "../third_party/PresentMon/PresentMon-2.5.1-x64.exe": "tools/PresentMon.exe", "../third_party/PresentMon/LICENSE.txt": "tools/PresentMon-LICENSE.txt" },
+    "windows": { "webviewInstallMode": { "type": "skip" }, "nsis": { "installMode": "perMachine", "startMenuFolder": "Game Boost Pro", "displayLanguageSelector": false, "installerHooks": "installer-hooks.nsh" } }
+  }
+}

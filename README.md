@@ -1,4 +1,18 @@
-# Game Boost Pro 3.3.1
+# Game Boost Pro 4.0.0
+
+Rebuilt for Windows in **Rust + Tauri**, with Thai/English UI, explicit Master and
+per-game Override profiles, reversible Boost/Restore, Steam/Epic discovery and
+on-demand PresentMon Frame Lab.
+
+**Current v4 documentation, installation, profiles and build commands:**
+[Rust v4 guide](docs/rust-v4.md).
+
+[Verification and security-review limits](docs/verification-v4.md).
+
+Build the current app with `./scripts/build-rust.ps1`. The legacy `build.ps1` and
+C# files below remain v3 recovery/reference sources; v4 does not wrap the C# app.
+
+## Legacy v3 Documentation
 
 One-button, reversible Windows gaming optimization with automatic game detection.
 

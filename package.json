@@ -1,0 +1,9 @@
+{
+  "name": "gameboostpro",
+  "version": "4.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "vite --host 127.0.0.1 --port 1420 --strictPort", "build": "vite build", "tauri": "tauri", "test:ui": "node tests/rust-ui.mjs" },
+  "dependencies": { "lucide": "^0.468.0" },
+  "devDependencies": { "@tauri-apps/cli": "^2.9.0", "@playwright/test": "^1.56.0", "vite": "^7.1.0" }
+}
