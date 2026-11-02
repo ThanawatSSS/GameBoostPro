@@ -104,14 +104,20 @@ pub fn installed() -> Result<Vec<Game>, String> {
     result.sort_by_key(|a| a.name.to_lowercase());
     Ok(result)
 }
+fn matches_game(config: &Config, process: &ProcessIdentity) -> bool {
+    !protected(&process.name)
+        && (known(&process.name).is_some()
+            || config
+                .games
+                .iter()
+                .any(|game| !game.path.is_empty() && process.path.eq_ignore_ascii_case(&game.path)))
+}
 pub fn running(config: &Config) -> Vec<ProcessIdentity> {
-    use std::{
-        cell::RefCell,
-        time::{Duration, Instant},
+    let Ok(account) = windows::owner() else {
+        return vec![];
     };
-    thread_local! {static DEEP:RefCell<(Option<Instant>,Vec<ProcessIdentity>)>=const{RefCell::new((None,Vec::new()))};}
     let processes = windows::processes();
-    let mut result: Vec<ProcessIdentity> = processes
+    processes
         .iter()
         .filter(|(_, name)| {
             !protected(name)
@@ -123,41 +129,45 @@ pub fn running(config: &Config) -> Vec<ProcessIdentity> {
                     }))
         })
         .filter_map(|(pid, _)| windows::identity(*pid))
-        .filter(|p| {
-            known(&p.name).is_some()
-                || config
-                    .games
-                    .iter()
-                    .any(|g| p.path.eq_ignore_ascii_case(&g.path) || inside(&p.path, &g.directory))
-        })
-        .collect();
-    DEEP.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if cache
-            .0
-            .is_none_or(|t| t.elapsed() >= Duration::from_secs(10))
-        {
-            cache.0 = Some(Instant::now());
-            cache.1 = processes
-                .iter()
-                .filter(|(_, name)| !protected(name) && known(name).is_none())
-                .filter_map(|(pid, _)| windows::identity(*pid))
-                .filter(|p| {
-                    config
-                        .games
-                        .iter()
-                        .any(|g| !g.directory.is_empty() && inside(&p.path, &g.directory))
-                })
-                .collect();
-        }
-        cache.1.retain(|p| {
-            windows::same(p) && config.games.iter().any(|g| inside(&p.path, &g.directory))
+        .filter(|p| windows::owned_by(p, &account))
+        .filter(|p| matches_game(config, p))
+        .collect()
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn helper_inside_game_directory_is_not_a_game() {
+        let mut config = Config::default();
+        config.games.push(Game {
+            id: "valorant".into(),
+            name: "VALORANT".into(),
+            source: "manual".into(),
+            path: r"C:\Riot Games\VALORANT\live\VALORANT.exe".into(),
+            directory: r"C:\Riot Games\VALORANT\live".into(),
+            launch: r"C:\Riot Games\VALORANT\live\VALORANT.exe".into(),
+            profile: None,
         });
-        for game in &cache.1 {
-            if !result.iter().any(|p| p.pid == game.pid) {
-                result.push(game.clone());
-            }
-        }
-    });
-    result
+        let helper = ProcessIdentity {
+            name: "EpicWebHelper.exe".into(),
+            path: r"C:\Riot Games\VALORANT\live\Engine\Binaries\Win64\EpicWebHelper.exe".into(),
+            ..Default::default()
+        };
+        assert!(!matches_game(&config, &helper));
+        let unrelated = ProcessIdentity {
+            name: "unrelated-helper.exe".into(),
+            path: r"C:\Riot Games\VALORANT\live\Engine\Binaries\Win64\unrelated-helper.exe".into(),
+            ..Default::default()
+        };
+        assert!(!protected(&unrelated.name));
+        assert!(!matches_game(&config, &unrelated));
+        let valorant = ProcessIdentity { name: "VALORANT-Win64-Shipping.exe".into(), path: r"C:\Riot Games\VALORANT\live\ShooterGame\Binaries\Win64\VALORANT-Win64-Shipping.exe".into(), ..Default::default() };
+        assert!(matches_game(&config, &valorant));
+        let custom = ProcessIdentity {
+            name: "VALORANT.exe".into(),
+            path: config.games[0].path.clone(),
+            ..Default::default()
+        };
+        assert!(matches_game(&config, &custom));
+    }
 }

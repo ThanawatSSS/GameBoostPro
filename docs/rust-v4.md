@@ -1,4 +1,4 @@
-# Game Boost Pro 4.0.0
+# Game Boost Pro 4.1.0
 
 Windows game-session control, rebuilt with Rust and Tauri. Thai and English interface.
 
@@ -18,17 +18,24 @@ another application or the user has changed it in the meantime.
 1. Open the app. Use Run as admin when starting a Boost session or frame recording.
 2. In Game library, Find games imports installed Steam/Epic games. Add .exe adds a
    local game. CS2, PUBG, VALORANT and other known processes are detected directly;
-   other installed-library games are checked by their installation directory.
+   other games need their actual game executable added explicitly to enable
+   automatic detection. Library discovery alone may not identify the game EXE.
 3. Select one game. Launch starts only that game, using the standard-user token
    even when Game Boost Pro is elevated. Launching a game does not launch the entire library.
-4. Set the Master slider, or enable Override for the selected game. A Master badge
-   means inheritance; the amber Override badge means the game has its own profile.
-5. Start Boost, play, then Restore. Closing an active session hides the window to
-   the tray. The tray can reopen it or Restore & quit. Idle windows close normally.
+4. Set the default on the Master profile page. In the game library, choose a game
+   to inspect it without changing the Boost target. Enable Override to give that
+   game its own profile, or leave it unchecked to use Master. Use Set as Boost
+   target separately when that is the game you intend to boost or launch.
+5. Start Boost, play, then Restore. Closing or minimizing the window hides the app
+   to the tray. Reopen it from Start or the tray. Use the exit button or tray menu
+   to restore any active session and quit. Recording continues while hidden. The
+   tray menu displays status, offers Boost or Restore, and controls Auto Boost;
+   the icon indicator is grey in normal mode, green during Boost, and amber when
+   attention is needed. The tooltip and menu also describe the status in text.
 
 Automatic Boost is opt-in after migrating to v4. Known games are checked every
-1.5 seconds while idle; active sessions use a 3-second interval. Directory discovery
-has a 10-second cache. Automatic sessions restore 10 seconds after their bound
+1.5 seconds while idle; active sessions use a 3-second interval. Detection does
+not treat every executable in an installation folder as a game. Automatic sessions restore 10 seconds after their bound
 game process ends. Manual Restore suppresses automatic re-boost for that process.
 
 ## Profiles and boundaries
@@ -70,6 +77,13 @@ blocks migration; use v3 Restore before updating. v3 config files are retained;
 v4 imports language, Master settings, manual games and their exact-path overrides.
 New library discovery rebuilds Steam/Epic entries. v4 uses config-v4.json and an
 owner-bound HKLM RecoveryV4 journal written before system changes.
+
+Recovery compares settings before restoring and retains the journal when a
+change cannot be verified. If priority access is denied to the standard user,
+the app does not bypass that restriction with its administrator token; recovery
+may require the user to inspect the process or retry. Comparisons and writes are
+separate Windows operations, so another application changing the same setting
+at exactly the same time can still race with Boost or Restore.
 
 Extract the complete Portable ZIP, including tools. Windows WebView2 Runtime is
 required. The installer does not download or run prerequisite installers. If the

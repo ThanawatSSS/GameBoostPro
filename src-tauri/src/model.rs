@@ -86,6 +86,10 @@ pub struct RegChange {
     pub name: String,
     pub before: RegValue,
     pub applied: RegValue,
+    #[serde(default)]
+    pub restored: bool,
+    #[serde(default)]
+    pub restore_started: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProcessChange {
@@ -93,10 +97,18 @@ pub struct ProcessChange {
     pub priority_before: u32,
     pub priority_applied: u32,
     pub verified: bool,
+    #[serde(default)]
+    pub restored: bool,
+    #[serde(default)]
+    pub restore_started: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Session {
     pub version: u8,
+    #[serde(default)]
+    pub recovery_schema: Option<u8>,
+    #[serde(default)]
+    pub session_id: Option<String>,
     pub owner: String,
     pub started: u64,
     pub profile: Profile,
@@ -105,9 +117,29 @@ pub struct Session {
     pub game_name: String,
     pub power_before: String,
     pub power_applied: String,
+    #[serde(default)]
+    pub power_restored: bool,
+    #[serde(default)]
+    pub power_restore_started: bool,
+    #[serde(default)]
+    pub restore_notes: Vec<String>,
     pub changes: Vec<RegChange>,
     pub process: Option<ProcessChange>,
     pub notes: Vec<String>,
+}
+impl Session {
+    pub fn recovery_uncertain(&self) -> bool {
+        self.recovery_schema.is_none()
+            || (self.power_restore_started && !self.power_restored)
+            || self
+                .process
+                .as_ref()
+                .is_some_and(|p| p.restore_started && !p.restored)
+            || self
+                .changes
+                .iter()
+                .any(|c| c.restore_started && !c.restored)
+    }
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -126,11 +158,15 @@ pub struct FrameResult {
 #[serde(rename_all = "camelCase")]
 pub struct Status {
     pub admin: bool,
+    pub recovery_required: bool,
+    pub recovery_uncertain: bool,
+    pub recovery_revision: Option<String>,
     pub platform: Platform,
     pub running: Vec<ProcessIdentity>,
     pub session: Option<Session>,
     pub legacy_recovery: bool,
     pub error: Option<String>,
+    pub notice: Option<String>,
     pub cpu: f64,
     pub ram_percent: u32,
     pub ram_used_gb: f64,
@@ -139,6 +175,9 @@ pub struct Status {
     pub frames: Vec<FrameResult>,
     pub capturing: bool,
     pub config: Config,
+    pub config_revision: String,
+    pub config_ready: bool,
+    pub config_error: Option<String>,
 }
 pub fn protected(name: &str) -> bool {
     let lower = name.to_lowercase();
@@ -176,6 +215,7 @@ pub fn protected(name: &str) -> bool {
         "unitycrashhandler32",
         "crashpad_handler",
         "steamwebhelper",
+        "epicwebhelper",
     ]
     .contains(&n)
         || n.starts_with("acer")

@@ -6,11 +6,12 @@ pub const DVR: &str = r"System\GameConfigStore";
 pub const CAPTURE: &str = r"Software\Microsoft\Windows\CurrentVersion\GameDVR";
 pub const GPU: &str = r"Software\Microsoft\DirectX\UserGpuPreferences";
 const RECOVERY: &str = r"SOFTWARE\GameBoostPro";
+const CONFIG_LIMIT: u64 = 2_000_000;
 
 pub fn read_config() -> Result<Config, String> {
     let path = windows::data_dir()?.join("config-v4.json");
     if path.is_file() {
-        let c: Config = read_json(&path, 2_000_000)?;
+        let c: Config = read_json(&path, CONFIG_LIMIT)?;
         validate_config(&c)?;
         return Ok(c);
     }
@@ -89,14 +90,7 @@ pub fn validate_config(c: &Config) -> Result<(), String> {
     }
     let mut ids = std::collections::HashSet::new();
     for g in &c.games {
-        if !ids.insert(&g.id)
-            || g.id.len() > 100
-            || g.name.is_empty()
-            || g.name.len() > 400
-            || g.directory.len() > 32700
-            || (!g.path.is_empty() && !valid_exe(&g.path))
-            || !valid_launch(g)
-        {
+        if !ids.insert(&g.id) || !valid_game(g) {
             return Err("Invalid game library entry".into());
         }
     }
@@ -106,6 +100,14 @@ pub fn validate_config(c: &Config) -> Result<(), String> {
         }
     }
     Ok(())
+}
+pub fn valid_game(g: &Game) -> bool {
+    g.id.len() <= 100
+        && !g.name.is_empty()
+        && g.name.len() <= 400
+        && g.directory.len() <= 32700
+        && (g.path.is_empty() || valid_exe(&g.path))
+        && valid_launch(g)
 }
 pub fn valid_launch(g: &Game) -> bool {
     if g.launch.is_empty() {
@@ -177,8 +179,18 @@ pub fn atomic_json<T: serde::Serialize>(path: &Path, value: &T) -> Result<(), St
     }
     Ok(())
 }
-pub fn save_config(c: &Config) -> Result<(), String> {
+fn validate_config_size(c: &Config) -> Result<(), String> {
     validate_config(c)?;
+    let bytes = serde_json::to_vec_pretty(c).map_err(|e| e.to_string())?;
+    if bytes.len() as u64 > CONFIG_LIMIT {
+        return Err(
+            "Game library exceeds the settings size limit; remove entries before saving.".into(),
+        );
+    }
+    Ok(())
+}
+pub fn save_config(c: &Config) -> Result<(), String> {
+    validate_config_size(c)?;
     windows::as_standard_user(|| atomic_json(&windows::data_dir()?.join("config-v4.json"), c))
 }
 pub fn get_value(key: &str, name: &str) -> Result<RegValue, String> {
@@ -264,6 +276,12 @@ pub fn legacy_pending() -> bool {
 }
 pub fn validate_session(s: &Session, owner: &str) -> Result<(), String> {
     if s.version != 4
+        || s.recovery_schema.is_some_and(|schema| schema != 1)
+        || s.session_id
+            .as_ref()
+            .is_some_and(|id| uuid::Uuid::parse_str(id).is_err())
+        || s.restore_notes.len() > 10
+        || s.restore_notes.iter().any(|note| note.len() > 500)
         || s.owner != owner
         || s.changes.len() > 8
         || uuid::Uuid::parse_str(&s.power_before).is_err()
@@ -311,6 +329,24 @@ pub fn validate_session(s: &Session, owner: &str) -> Result<(), String> {
 mod tests {
     use super::*;
     #[test]
+    fn a_saved_config_must_fit_the_read_limit() {
+        let mut config = Config::default();
+        assert!(validate_config_size(&config).is_ok());
+        for id in 0..70 {
+            config.games.push(Game {
+                id: format!("steam-{id}"),
+                name: "Game".into(),
+                source: "steam".into(),
+                path: String::new(),
+                launch: format!("steam://rungameid/{id}"),
+                directory: "x".repeat(30_000),
+                profile: None,
+            });
+        }
+        assert!(validate_config(&config).is_ok());
+        assert!(validate_config_size(&config).is_err());
+    }
+    #[test]
     fn launch_validation() {
         let mut g = Game {
             id: "a".into(),
@@ -331,6 +367,8 @@ mod tests {
     fn recovery_rejects_privilege_paths() {
         let mut s = Session {
             version: 4,
+            recovery_schema: Some(1),
+            session_id: None,
             owner: "test".into(),
             started: 0,
             profile: Profile::Balanced,
@@ -339,6 +377,9 @@ mod tests {
             game_name: "".into(),
             power_before: uuid::Uuid::nil().to_string(),
             power_applied: uuid::Uuid::nil().to_string(),
+            power_restored: false,
+            power_restore_started: false,
+            restore_notes: vec![],
             changes: vec![],
             process: None,
             notes: vec![],
@@ -349,6 +390,8 @@ mod tests {
             name: "evil".into(),
             before: RegValue::Missing,
             applied: RegValue::Text("evil".into()),
+            restored: false,
+            restore_started: false,
         });
         assert!(validate_session(&s, "test").is_err());
     }

@@ -37,7 +37,7 @@ pub fn admin() -> bool {
 pub struct Instance {
     _handles: Vec<Handle>,
 }
-pub fn instance() -> Result<Instance, String> {
+pub fn instance(handoff: bool) -> Result<Instance, String> {
     unsafe {
         let mut handles = Vec::new();
         let names = if admin() {
@@ -54,6 +54,9 @@ pub fn instance() -> Result<Instance, String> {
                 return Err("Cannot establish a single application instance".into());
             }
             if GetLastError() == ERROR_ALREADY_EXISTS {
+                if !handoff && name.starts_with("Local\\") && show_existing_instance() {
+                    return Err("EXISTING_INSTANCE_SHOWN".into());
+                }
                 let result = WaitForSingleObject(h.0, 7000);
                 if result != WAIT_OBJECT_0 && result != WAIT_ABANDONED {
                     return Err("Game Boost Pro is already running. Close the existing window or tray app first.".into());
@@ -62,6 +65,25 @@ pub fn instance() -> Result<Instance, String> {
             handles.push(h);
         }
         Ok(Instance { _handles: handles })
+    }
+}
+fn show_existing_instance() -> bool {
+    unsafe {
+        let window = FindWindowW(std::ptr::null(), wide("Game Boost Pro 4.1").as_ptr());
+        if window.is_null() {
+            return false;
+        }
+        let mut pid = 0;
+        GetWindowThreadProcessId(window, &mut pid);
+        let same_exe = std::env::current_exe().ok().and_then(|exe| {
+            identity(pid).map(|process| process.path.eq_ignore_ascii_case(&exe.to_string_lossy()))
+        });
+        if same_exe != Some(true) {
+            return false;
+        }
+        ShowWindow(window, SW_RESTORE);
+        SetForegroundWindow(window);
+        true
     }
 }
 pub fn owner() -> Result<String, String> {
@@ -142,6 +164,55 @@ pub fn identity(pid: u32) -> Option<ProcessIdentity> {
 pub fn same(a: &ProcessIdentity) -> bool {
     identity(a.pid).is_some_and(|p| p.started == a.started && p.path.eq_ignore_ascii_case(&a.path))
 }
+// Automatic discovery must not react to games running under another account.
+pub fn owned_by(a: &ProcessIdentity, account: &str) -> bool {
+    unsafe {
+        let process = Handle(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, a.pid));
+        if process.0.is_null() {
+            return false;
+        }
+        let mut created = zeroed();
+        let mut exited = zeroed();
+        let mut kernel = zeroed();
+        let mut user = zeroed();
+        let mut token = std::ptr::null_mut();
+        if GetProcessTimes(process.0, &mut created, &mut exited, &mut kernel, &mut user) == 0
+            || ft(created) != a.started
+            || OpenProcessToken(process.0, TOKEN_QUERY, &mut token) == 0
+        {
+            return false;
+        }
+        let token = Handle(token);
+        token_owner(token.0).is_ok_and(|owner| owner == account)
+    }
+}
+#[cfg(test)]
+mod account_tests {
+    use super::*;
+
+    #[test]
+    fn current_process_is_only_matched_to_its_account() {
+        let process = identity(std::process::id()).expect("read test process identity");
+        let account = owner().expect("read test account");
+        assert!(owned_by(&process, &account));
+        assert!(!owned_by(&process, "S-1-0-0"));
+        let mut stale = process;
+        stale.started = stale.started.wrapping_add(1);
+        assert!(!owned_by(&stale, &account));
+    }
+}
+pub fn same_for_restore(a: &ProcessIdentity) -> Result<bool, String> {
+    if let Some(p) = identity(a.pid) {
+        return Ok(p.started == a.started && p.path.eq_ignore_ascii_case(&a.path));
+    }
+    unsafe {
+        let handle = Handle(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, a.pid));
+        if handle.0.is_null() && GetLastError() == ERROR_INVALID_PARAMETER {
+            return Ok(false);
+        }
+    }
+    Err("Cannot verify whether the game process is still running; retry recovery.".into())
+}
 pub fn processes() -> Vec<(u32, String)> {
     unsafe {
         let h = Handle(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
@@ -159,6 +230,7 @@ pub fn processes() -> Vec<(u32, String)> {
         output
     }
 }
+pub const PRIORITY_UNCERTAIN: &str = "Priority may have changed but could not be verified";
 pub fn priority(target: &ProcessIdentity, set: Option<u32>) -> Result<u32, String> {
     if crate::model::protected(&target.name) || !same(target) {
         return Err("The game process changed or is protected".into());
@@ -203,8 +275,11 @@ pub fn priority(target: &ProcessIdentity, set: Option<u32>) -> Result<u32, Strin
             {
                 return Err("Invalid priority recovery value".into());
             }
-            if SetPriorityClass(h.0, p) == 0 || GetPriorityClass(h.0) != p {
+            if SetPriorityClass(h.0, p) == 0 {
                 return Err("Game/anti-cheat rejected priority change".into());
+            }
+            if GetPriorityClass(h.0) != p {
+                return Err(PRIORITY_UNCERTAIN.into());
             }
         }
         Ok(before)
@@ -568,14 +643,18 @@ pub fn as_standard_user<T>(f: impl FnOnce() -> Result<T, String>) -> Result<T, S
     f()
 }
 pub fn shell(target: &str, verb: Option<&str>) -> Result<(), String> {
+    shell_with_args(target, verb, None)
+}
+pub fn shell_with_args(target: &str, verb: Option<&str>, args: Option<&str>) -> Result<(), String> {
     unsafe {
         let t = wide(target);
         let v = verb.map(wide);
+        let a = args.map(wide);
         let r = ShellExecuteW(
             std::ptr::null_mut(),
             v.as_ref().map_or(std::ptr::null(), |v| v.as_ptr()),
             t.as_ptr(),
-            std::ptr::null(),
+            a.as_ref().map_or(std::ptr::null(), |a| a.as_ptr()),
             std::ptr::null(),
             SW_SHOWNORMAL,
         );

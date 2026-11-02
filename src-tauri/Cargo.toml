@@ -1,6 +1,6 @@
 [package]
 name = "gameboostpro"
-version = "4.0.0"
+version = "4.1.0"
 description = "Game Boost Pro: reversible Windows game sessions"
 authors = ["ThanawatSSS"]
 edition = "2021"
